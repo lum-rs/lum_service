@@ -8,7 +8,7 @@ description = "lum framework's service library"
 readme = "README.md"
 repository = "https://github.com/lum-rs/lum_service"
 license = "MIT"
-keywords = ["lum", "framework", "service", "service"]
+keywords = ["lum", "framework", "service"]
 exclude = [".devcontainer", ".github", ".vscode"]
 
 [profile.release]

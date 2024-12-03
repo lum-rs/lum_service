@@ -5,7 +5,7 @@ use lum_libs::tokio::{
     task::JoinHandle,
     time::timeout,
 };
-use lum_log::{error, info, warn};
+use lum_log::{error, info};
 
 use crate::taskchain::Taskchain;
 
@@ -23,67 +23,6 @@ use std::{
     time::Duration,
 };
 
-#[derive(Default)]
-pub struct ServiceManagerBuilder {
-    services: Vec<Arc<Mutex<dyn Service>>>,
-}
-
-impl ServiceManagerBuilder {
-    pub fn new() -> Self {
-        Self {
-            services: Vec::new(),
-        }
-    }
-
-    //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
-    pub async fn with_service(mut self, service: Arc<Mutex<dyn Service>>) -> Self {
-        let lock = service.lock().await;
-
-        let mut found = false;
-        for registered_service in self.services.iter() {
-            let registered_service = registered_service.lock().await;
-
-            if registered_service.info().id == lock.info().id {
-                found = true;
-            }
-        }
-
-        if found {
-            warn!(
-                "Tried to add service {} ({}), but a service with that ID already exists. Ignoring.",
-                lock.info().name,
-                lock.info().id
-            );
-            return self;
-        }
-
-        drop(lock);
-
-        self.services.push(service);
-        self
-    }
-
-    pub async fn build(self) -> Arc<ServiceManager> {
-        let service_manager = ServiceManager {
-            weak: OnceLock::new(),
-            services: self.services,
-            background_tasks: Mutex::new(HashMap::new()),
-            on_status_change: EventRepeater::new("service_manager_on_status_change").await,
-        };
-
-        let arc = Arc::new(service_manager);
-        let weak = Arc::downgrade(&arc);
-
-        let result = arc.weak.set(weak);
-        if result.is_err() {
-            error!("Unable to set ServiceManager's Weak self-reference in ServiceManagerBuilder because it was already set. This should never happen. Shutting down ungracefully to prevent further undefined behavior.");
-            unreachable!("Unable to set ServiceManager's Weak self-reference in ServiceManagerBuilder because it was already set.");
-        }
-
-        arc
-    }
-}
-
 pub struct ServiceManager {
     weak: OnceLock<Weak<Self>>,
     background_tasks: Mutex<HashMap<String, JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>>>,
@@ -93,8 +32,26 @@ pub struct ServiceManager {
 }
 
 impl ServiceManager {
-    pub fn builder() -> ServiceManagerBuilder {
-        ServiceManagerBuilder::new()
+    pub async fn new(services: Vec<Arc<Mutex<dyn Service>>>) -> Arc<Self> {
+        let service_manager = ServiceManager {
+            weak: OnceLock::new(),
+            services,
+            background_tasks: Mutex::new(HashMap::new()),
+            on_status_change: EventRepeater::new("service_manager_on_status_change").await,
+        };
+
+        let arc = Arc::new(service_manager);
+        let weak = Arc::downgrade(&Arc::clone(&arc));
+
+        let result = arc.weak.set(weak);
+        if result.is_err() {
+            error!("Failed to set ServiceManager's Weak self-reference because it was already set. This should never happen. Panicking to prevent further undefined behavior.");
+            unreachable!(
+                "Failed to set ServiceManager's Weak self-reference because it was already set."
+            );
+        }
+
+        arc
     }
 
     pub async fn manages_service(&self, service_id: &str) -> bool {
