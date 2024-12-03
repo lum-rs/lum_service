@@ -1,3 +1,4 @@
+use lum_boxtypes::BoxedError;
 use lum_event::EventRepeater;
 use lum_libs::tokio::{
     spawn,
@@ -16,7 +17,6 @@ use super::{
 
 use std::{
     collections::HashMap,
-    error::Error,
     fmt::{self, Display},
     mem,
     sync::{Arc, OnceLock, Weak},
@@ -24,11 +24,11 @@ use std::{
 };
 
 pub struct ServiceManager {
-    weak: OnceLock<Weak<Self>>,
-    background_tasks: Mutex<HashMap<String, JoinHandle<Result<(), Box<dyn Error + Send + Sync>>>>>,
-
     pub services: Vec<Arc<Mutex<dyn Service>>>,
     pub on_status_change: Arc<EventRepeater<Status>>,
+
+    weak: OnceLock<Weak<Self>>,
+    background_tasks: Mutex<HashMap<String, JoinHandle<Result<(), BoxedError>>>>,
 }
 
 impl ServiceManager {

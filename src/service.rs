@@ -4,13 +4,12 @@ use std::{
     sync::Arc,
 };
 
+use lum_boxtypes::{BoxedError, LifetimedPinnedBoxedFutureResult};
 use lum_event::Observable;
 use lum_libs::{
     async_trait::async_trait,
     downcast_rs::{impl_downcast, DowncastSync},
 };
-
-use crate::types::{BoxedError, LifetimedPinnedBoxedFutureResult};
 
 use super::{
     service_manager::ServiceManager,

@@ -1203,6 +1203,7 @@ dependencies = [
 name = "lum_service"
 version = "0.1.0"
 dependencies = [
+ "lum_boxtypes",
  "lum_event",
  "lum_libs",
  "lum_log",

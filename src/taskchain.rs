@@ -1,7 +1,7 @@
 use core::mem;
 use std::future::Future;
 
-use crate::types::LifetimedPinnedBoxedFuture;
+use lum_boxtypes::LifetimedPinnedBoxedFuture;
 
 pub struct Taskchain<'a, T: Send + Sync + 'static> {
     task: LifetimedPinnedBoxedFuture<'a, T>,
