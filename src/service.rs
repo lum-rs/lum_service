@@ -1,14 +1,11 @@
-use std::{
-    cmp::Ordering,
-    hash::{Hash, Hasher},
-    sync::Arc,
-};
+use std::{cmp::Ordering, sync::Arc};
 
-use lum_boxtypes::{BoxedError, LifetimedPinnedBoxedFutureResult};
+use lum_boxtypes::BoxedError;
 use lum_event::Observable;
 use lum_libs::{
     async_trait::async_trait,
     downcast_rs::{impl_downcast, DowncastSync},
+    uuid::Uuid,
 };
 
 use super::{
@@ -18,6 +15,7 @@ use super::{
 
 #[derive(Debug)]
 pub struct ServiceInfo {
+    pub uuid: Uuid,
     pub id: String,
     pub name: String,
     pub priority: Priority,
@@ -28,7 +26,8 @@ pub struct ServiceInfo {
 impl ServiceInfo {
     pub fn new(id: &str, name: &str, priority: Priority) -> Self {
         Self {
-            id: id.to_string(),
+            uuid: Uuid::new_v4(),
+            id: id.to_string(), //TODO: Drop?
             name: name.to_string(),
             priority,
             status: Observable::new(Status::Stopped, format!("{}_status_change", id)),
@@ -38,7 +37,7 @@ impl ServiceInfo {
 
 impl PartialEq for ServiceInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.uuid == other.uuid
     }
 }
 
@@ -56,25 +55,17 @@ impl PartialOrd for ServiceInfo {
     }
 }
 
-impl Hash for ServiceInfo {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
-}
 //TODO: When Rust allows async trait methods to be object-safe, refactor this to not use async_trait anymore
 #[async_trait]
 pub trait Service: DowncastSync {
     fn info(&self) -> &ServiceInfo;
-    fn info_mut(&mut self) -> &mut ServiceInfo;
+    fn info_mut(&mut self) -> &mut ServiceInfo; //TODO: When lum_event offers SyncObservable, remove this
 
     async fn start(&mut self, service_manager: Arc<ServiceManager>) -> Result<(), BoxedError>;
     async fn stop(&mut self) -> Result<(), BoxedError>;
-    fn task<'a>(&self) -> Option<LifetimedPinnedBoxedFutureResult<'a, ()>> {
-        None
-    }
 
     fn is_available(&self) -> bool {
-        matches!(self.info().status.get(), Status::Started)
+        self.info().status.get() == Status::Started
     }
 }
 
@@ -97,11 +88,5 @@ impl Ord for dyn Service {
 impl PartialOrd for dyn Service {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-impl Hash for dyn Service {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.info().hash(state);
     }
 }

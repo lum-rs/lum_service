@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use lum_event::event_repeater::{AttachError, DetachError};
-use lum_libs::thiserror::Error;
+use lum_libs::{thiserror::Error, uuid::Uuid};
 
 #[derive(Debug, Clone)]
 pub enum Status {
@@ -77,37 +77,43 @@ impl Display for Priority {
 
 #[derive(Debug, Error)]
 pub enum StartupError {
-    #[error("Service {0} is not managed by this Service Manager")]
-    ServiceNotManaged(String),
+    #[error("Service {0} ({1}) is not managed by this Service Manager")]
+    ServiceNotManaged(String, Uuid),
 
-    #[error("Service {0} is not stopped")]
-    ServiceNotStopped(String),
+    #[error("Service {0} ({1}) is not stopped")]
+    ServiceNotStopped(String, Uuid),
 
-    #[error("Service {0} already has a background task running")]
-    BackgroundTaskAlreadyRunning(String),
+    #[error("Service {0} ({1}) already has a background task running")]
+    BackgroundTaskAlreadyRunning(String, Uuid),
 
     #[error(
-        "Failed to attach Service Manager's status_change EventRepeater to {0}'s status_change Event: {1}"
+        "Failed to attach Service Manager's status_change EventRepeater to {0} ({1})'s status_change Event: {2}"
     )]
-    StatusAttachmentFailed(String, AttachError),
+    StatusAttachmentFailed(String, Uuid, AttachError),
 
-    #[error("Service {0} failed to start")]
-    FailedToStartService(String),
+    #[error("Service {0} ({1}) failed to start")]
+    FailedToStartService(String, Uuid),
 }
 
 #[derive(Debug, Error)]
 pub enum ShutdownError {
-    #[error("Service {0} is not managed by this Service Manager")]
-    ServiceNotManaged(String),
+    #[error("Service {0} ({1}) is not managed by this Service Manager")]
+    ServiceNotManaged(String, Uuid),
 
-    #[error("Service {0} is not started")]
-    ServiceNotStarted(String),
+    #[error("Service {0} ({1}) is not started")]
+    ServiceNotStarted(String, Uuid),
 
-    #[error("Service {0} failed to stop")]
-    FailedToStopService(String),
+    #[error("Service {0} ({1}) failed to stop")]
+    FailedToStopService(String, Uuid),
 
     #[error(
-        "Failed to detach Service Manager's status_change EventRepeater from {0}'s status_change Event: {1}"
+        "Failed to detach Service Manager's status_change EventRepeater from {0} ({1})'s status_change Event: {2}"
     )]
-    StatusDetachmentFailed(String, DetachError),
+    StatusDetachmentFailed(String, Uuid, DetachError),
+}
+
+#[derive(Debug, Error)]
+pub enum RunTaskError {
+    #[error("Service {0} ({1}) is not managed by this Service Manager")]
+    ServiceNotManaged(String, Uuid),
 }

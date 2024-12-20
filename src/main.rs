@@ -1,3 +1,7 @@
+fn ぷりんとめっせじぇ(めっせじぇ: String) {
+    println!("{}", めっせじぇ);
+}
+
 fn main() {
-    println!("Hello, world!");
+    ぷりんとめっせじぇ("Hello, world!".to_string());
 }

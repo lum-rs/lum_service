@@ -3,19 +3,19 @@ use std::future::Future;
 
 use lum_boxtypes::LifetimedPinnedBoxedFuture;
 
-pub struct Taskchain<'a, T: Send + Sync + 'static> {
-    task: LifetimedPinnedBoxedFuture<'a, T>,
+pub struct Taskchain<'task, T: Send + Sync + 'task> {
+    task: LifetimedPinnedBoxedFuture<'task, T>,
 }
 
-impl<'a, T: Send + Sync + 'static> Taskchain<'a, T> {
-    pub fn new(task: LifetimedPinnedBoxedFuture<'a, T>) -> Self {
+impl<'task, T: Send + Sync + 'task> Taskchain<'task, T> {
+    pub fn new(task: LifetimedPinnedBoxedFuture<'task, T>) -> Self {
         Self { task }
     }
 
     pub fn append<FN, FUT>(&mut self, task: FN)
     where
-        FN: FnOnce(T) -> FUT + Send + Sync + 'a,
-        FUT: Future<Output = T> + Send + Sync + 'a,
+        FN: FnOnce(T) -> FUT + Send + Sync + 'task,
+        FUT: Future<Output = T> + Send + Sync + 'task,
     {
         let previous_task = mem::replace(
             &mut self.task,
