@@ -46,16 +46,16 @@ impl PartialEq for Status {
 impl Eq for Status {}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub enum OverallStatus {
+pub enum Health {
     Healthy,
     Unhealthy,
 }
 
-impl Display for OverallStatus {
+impl Display for Health {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OverallStatus::Healthy => write!(f, "Healthy"),
-            OverallStatus::Unhealthy => write!(f, "Unhealthy"),
+            Health::Healthy => write!(f, "Healthy"),
+            Health::Unhealthy => write!(f, "Unhealthy"),
         }
     }
 }
@@ -114,6 +114,9 @@ pub enum ShutdownError {
 
 #[derive(Debug, Error)]
 pub enum RunTaskError {
+    #[error("Service {0} ({1}) is not started or currently starting")]
+    ServiceNotStarted(String, Uuid),
+
     #[error("Service {0} ({1}) is not managed by this Service Manager")]
     ServiceNotManaged(String, Uuid),
 }
