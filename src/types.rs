@@ -5,24 +5,26 @@ use lum_libs::{thiserror::Error, uuid::Uuid};
 
 #[derive(Debug, Clone)]
 pub enum Status {
-    Started,
-    Stopped,
     Starting,
+    Started,
     Stopping,
+    Stopped,
     FailedToStart(String),
     FailedToStop(String),
+    Failing,
     RuntimeError(String),
 }
 
 impl Display for Status {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Status::Started => write!(f, "Started"),
-            Status::Stopped => write!(f, "Stopped"),
             Status::Starting => write!(f, "Starting"),
+            Status::Started => write!(f, "Started"),
             Status::Stopping => write!(f, "Stopping"),
+            Status::Stopped => write!(f, "Stopped"),
             Status::FailedToStart(error) => write!(f, "Failed to start: {}", error),
             Status::FailedToStop(error) => write!(f, "Failed to stop: {}", error),
+            Status::Failing => write!(f, "Failing"),
             Status::RuntimeError(error) => write!(f, "Runtime error: {}", error),
         }
     }
@@ -32,12 +34,13 @@ impl PartialEq for Status {
     fn eq(&self, other: &Self) -> bool {
         matches!(
             (self, other),
-            (Status::Started, Status::Started)
-                | (Status::Stopped, Status::Stopped)
-                | (Status::Starting, Status::Starting)
+            (Status::Starting, Status::Starting)
+                | (Status::Started, Status::Started)
                 | (Status::Stopping, Status::Stopping)
+                | (Status::Stopped, Status::Stopped)
                 | (Status::FailedToStart(_), Status::FailedToStart(_))
                 | (Status::FailedToStop(_), Status::FailedToStop(_))
+                | (Status::Failing, Status::Failing)
                 | (Status::RuntimeError(_), Status::RuntimeError(_))
         )
     }
@@ -46,16 +49,16 @@ impl PartialEq for Status {
 impl Eq for Status {}
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-pub enum OverallStatus {
+pub enum Health {
     Healthy,
     Unhealthy,
 }
 
-impl Display for OverallStatus {
+impl Display for Health {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            OverallStatus::Healthy => write!(f, "Healthy"),
-            OverallStatus::Unhealthy => write!(f, "Unhealthy"),
+            Health::Healthy => write!(f, "Healthy"),
+            Health::Unhealthy => write!(f, "Unhealthy"),
         }
     }
 }
@@ -114,6 +117,9 @@ pub enum ShutdownError {
 
 #[derive(Debug, Error)]
 pub enum RunTaskError {
+    #[error("Service {0} ({1}) is not started or currently starting")]
+    ServiceNotStarted(String, Uuid),
+
     #[error("Service {0} ({1}) is not managed by this Service Manager")]
     ServiceNotManaged(String, Uuid),
 }

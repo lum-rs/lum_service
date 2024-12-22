@@ -15,7 +15,7 @@ use crate::{taskchain::Taskchain, types::RunTaskError};
 
 use super::{
     service::Service,
-    types::{OverallStatus, Priority, ShutdownError, StartupError, Status},
+    types::{Health, Priority, ShutdownError, StartupError, Status},
 };
 
 use std::{
@@ -213,20 +213,12 @@ impl ServiceManager {
         self.get_service_by_uuid(uuid).await.is_some()
     }
 
-    pub async fn manages_service_by_mutex_guard(
-        &self,
-        service: &mut MutexGuard<'_, dyn Service>,
-    ) -> bool {
-        let uuid = &service.info().uuid;
-
-        self.manages_service_by_uuid(uuid).await
-    }
-
     pub async fn manages_service(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
         let service_lock = service.lock().await;
-        let uuid = &service_lock.info().uuid;
+        let uuid = service_lock.info().uuid;
+        drop(service_lock); //Avoids deadlock because manages_service_by_uuid also locks the service
 
-        self.manages_service_by_uuid(uuid).await
+        self.manages_service_by_uuid(&uuid).await
     }
 
     pub async fn has_background_tasks_by_uuid(&self, uuid: &Uuid) -> bool {
@@ -251,7 +243,7 @@ impl ServiceManager {
     }
 
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
-    pub async fn overall_status(&self) -> OverallStatus {
+    pub async fn health(&self) -> Health {
         for service in self.services.iter() {
             let service = service.lock().await;
 
@@ -261,11 +253,11 @@ impl ServiceManager {
 
             let status = service.info().status.get();
             if status != Status::Started {
-                return OverallStatus::Unhealthy;
+                return Health::Unhealthy;
             }
         }
 
-        OverallStatus::Healthy
+        Health::Healthy
     }
 
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
@@ -352,28 +344,32 @@ impl ServiceManager {
         &self,
         service: &mut MutexGuard<'_, dyn Service>,
     ) -> Result<(), StartupError> {
-        let weak = match self.weak.get() {
+        let service_manager_weak = match self.weak.get() {
             Some(weak) => weak,
             None => {
-                error!("ServiceManager's Weak self-reference was None while initializing service {}. This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.", service.info().id);
+                let service_uuid = service.info().uuid;
+                let service_id = service.info().id.clone();
+                error!("ServiceManager's Weak self-reference was None while initializing service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.", service_id, service_uuid);
                 panic!(
-                    "ServiceManager's Weak self-reference was None while initializing service {}.",
-                    service.info().id
+                    "ServiceManager's Weak self-reference was None while initializing service {} ({}).",
+                    service_id, service_uuid
                 );
             }
         };
 
         // This can't fail now because the Arc is guaranteed to be valid as long as &self is valid. We do error handling just in case.
-        let arc = match weak.upgrade() {
+        let service_manager_arc = match service_manager_weak.upgrade() {
             Some(arc) => arc,
             None => {
-                error!("ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {}. This should never happen. Shutting down ungracefully to prevent further undefined behavior.", service.info().id);
-                unreachable!("ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {}.", service.info().id);
+                let service_uuid = service.info().uuid;
+                let service_id = service.info().id.clone();
+                error!("ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}). This should never happen. Shutting down ungracefully to prevent further undefined behavior.", service_id, service_uuid);
+                unreachable!("ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}).", service_id, service_uuid);
             }
         };
 
         service.info_mut().status.set(Status::Starting).await;
-        let start = service.start(arc);
+        let start = service.start(service_manager_arc);
         let timeout_result = timeout(Duration::from_secs(10), start).await; //TODO: Add to config instead of hardcoding duration
 
         //TODO: Merge all cases into enum with variants "Ok", "Err", and "Timeout"
@@ -414,7 +410,7 @@ impl ServiceManager {
         service: &mut MutexGuard<'_, dyn Service>,
     ) -> Result<(), ShutdownError> {
         service.info_mut().status.set(Status::Stopping).await;
-        self.stop_background_task(service).await;
+        self.abort_background_tasks(service).await;
         let stop = service.stop();
         let timeout_result = timeout(Duration::from_secs(10), stop).await; //TODO: Add to config instead of hardcoding duration
 
@@ -451,7 +447,21 @@ impl ServiceManager {
         Ok(())
     }
 
-    //TODO: fail_service
+    async fn fail_service<IntoString: Into<String>>(
+        &self,
+        service: &mut MutexGuard<'_, dyn Service>,
+        message: IntoString,
+    ) {
+        service.info_mut().status.set(Status::Failing).await;
+        self.abort_background_tasks(service).await;
+
+        let message = message.into();
+        service
+            .info_mut()
+            .status
+            .set(Status::RuntimeError(message))
+            .await;
+    }
 
     pub async fn run_task(
         &self,
@@ -460,66 +470,78 @@ impl ServiceManager {
     ) -> Result<(), RunTaskError> {
         let service_uuid = service.info().uuid;
         let service_id = service.info().id.clone();
+        let service_status = service.info().status.get();
 
-        let service_arc = match self.get_service_by_uuid(&service_uuid).await {
-            Some(service) => service,
+        if service_status != Status::Starting && service_status != Status::Started {
+            return Err(RunTaskError::ServiceNotStarted(service_id, service_uuid));
+        }
+
+        let service_manager_weak = match self.weak.get() {
+            Some(weak) => weak.clone(),
             None => {
-                return Err(RunTaskError::ServiceNotManaged(service_id, service_uuid));
+                error!("ServiceManager's Weak self-reference was None while running a task for service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.", service_id, service_uuid);
+                panic!(
+                    "ServiceManager's Weak self-reference was None while running a task for service {} ({}).",
+                    service_id, service_uuid
+                );
             }
         };
 
-        let service_weak = Arc::downgrade(&service_arc);
+        let service_uuid_clone = service_uuid;
         let service_id = service.info().id.clone();
         let mut taskchain = Taskchain::new(task);
         //TODO: When Rust allows async closures, refactor this to have the "async" keyword after the "move" keyword
-        taskchain.append(move |result| async {
-            let service_weak = service_weak;
+        taskchain.append(move |result| async move {
+            let service_manager_weak = service_manager_weak;
+            let service_uuid = service_uuid_clone;
             let service_id = service_id;
 
-            let service = match service_weak.upgrade() {
-                Some(service) => service,
+            let service_manager_arc = match service_manager_weak.upgrade() {
+                Some(arc) => arc,
                 None => {
                     error!(
-                        "A task of a service {} unexpectedly ended, but no service with that ID was registered in the ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior.",
-                        service_id
-                    );
+                        "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior.",
+                        service_id, service_uuid);
                     panic!(
-                        "A task of a service {} unexpectedly ended, but no service with that ID was registered in the ServiceManager. Was it removed while the task was running?",
-                        service_id
-                    );
+                        "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped.",
+                        service_id, service_uuid
+                    );     
                 }
             };
 
+            let service = match service_manager_arc.get_service_by_uuid(&service_uuid).await {
+                Some(service) => service,
+                None => {
+                    error!(
+                        "A task of a service {} ({}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior.",
+                        service_id, service_uuid
+                    );
+                    panic!(
+                        "A task of a service {} ({}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running?",
+                        service_id, service_uuid
+                    );
+                }
+            };
             let mut service_lock = service.lock().await;
 
             match result {
                 Ok(()) => {
                     error!(
-                        "Background task of service {} ended unexpectedly! Service will be marked as failed.",
-                        service_lock.info().id
+                        "Background task of service {} ({}) ended unexpectedly! Service will be marked as failed.",
+                        service_id, service_uuid
                     );
 
-                    service_lock
-                        .info_mut()
-                        .status
-                        .set(Status::RuntimeError("Background task ended unexpectedly!".to_string()))
-                        .await;
+                    service_manager_arc.fail_service(&mut service_lock, "Background task ended unexpectedly!").await;
                 }
 
                 Err(error) => {
                     error!(
-                        "Background task of service {} ended with error: {}. Service will be marked as failed.",
-                        service_lock.info().id,
+                        "Background task of service {} ({}) ended with error: {}. Service will be marked as failed.",
+                        service_id, service_uuid,
                         error
                     );
 
-                    service_lock
-                        .info_mut()
-                        .status
-                        .set(Status::RuntimeError(
-                            format!("Background task ended with error: {}", error),
-                        ))
-                        .await;
+                    service_manager_arc.fail_service(&mut service_lock, error.to_string()).await;
                 }
             }
             Ok(())
@@ -527,7 +549,6 @@ impl ServiceManager {
 
         let join_handle = spawn(taskchain.run());
 
-        //TODO: Stop other running background tasks of the service when one task fails
         let mut background_tasks = self.background_tasks.lock().await;
         background_tasks
             .entry(service_uuid)
@@ -537,23 +558,19 @@ impl ServiceManager {
         Ok(())
     }
 
-    //TODO: Rework
-    async fn stop_background_task(&self, service_lock: &MutexGuard<'_, dyn Service>) {
-        if !self
-            .has_background_tasks_by_uuid(&service_lock.info().uuid)
-            .await
-        {
+    async fn abort_background_tasks(&self, service_lock: &MutexGuard<'_, dyn Service>) {
+        let service_uuid = &service_lock.info().uuid;
+
+        if !self.has_background_tasks_by_uuid(service_uuid).await {
             return;
         }
 
-        let service_uuid = service_lock.info().uuid;
-
         let mut background_tasks = self.background_tasks.lock().await;
-        let tasks = background_tasks.get_mut(&service_lock.info().uuid).unwrap();
+        let tasks = background_tasks.get_mut(service_uuid).unwrap();
         for task in tasks.iter() {
             task.abort();
         }
-        background_tasks.remove(&service_uuid);
+        background_tasks.remove(service_uuid);
     }
 }
 
