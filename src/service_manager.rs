@@ -456,6 +456,8 @@ impl ServiceManager {
         self.abort_background_tasks(service).await;
 
         let message = message.into();
+        
+        service.fail(&message).await;
         service
             .info_mut()
             .status

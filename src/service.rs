@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, sync::Arc};
 
-use lum_boxtypes::BoxedError;
+use lum_boxtypes::{BoxedError, PinnedBoxedFuture};
 use lum_event::Observable;
 use lum_libs::{
     async_trait::async_trait,
@@ -63,6 +63,10 @@ pub trait Service: DowncastSync {
 
     async fn start(&mut self, service_manager: Arc<ServiceManager>) -> Result<(), BoxedError>;
     async fn stop(&mut self) -> Result<(), BoxedError>;
+    fn fail(&mut self, _message: &str) -> PinnedBoxedFuture<()> {
+        //Can't rely on async_trait here, as it returns a non-Sync Future.
+        Box::pin(async move {})
+    }
 
     fn is_available(&self) -> bool {
         self.info().status.get() == Status::Started
