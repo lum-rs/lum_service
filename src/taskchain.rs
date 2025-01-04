@@ -15,7 +15,7 @@ impl<'task, T: Send + Sync + 'task> Taskchain<'task, T> {
     pub fn append<FN, FUT>(&mut self, task: FN)
     where
         FN: FnOnce(T) -> FUT + Send + Sync + 'task,
-        FUT: Future<Output = T> + Send + Sync + 'task,
+        FUT: Future<Output = T> + Send + Sync,
     {
         let previous_task = mem::replace(
             &mut self.task,

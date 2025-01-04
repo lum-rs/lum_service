@@ -11,7 +11,7 @@ use lum_libs::{
 };
 use lum_log::{error, info};
 
-use crate::{taskchain::Taskchain, types::RunTaskError};
+use crate::{service::ServiceInfo, taskchain::Taskchain, types::RunTaskError};
 
 use super::{
     service::Service,
@@ -66,6 +66,7 @@ impl ServiceManager {
         let service_info = service_lock.info();
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
+
 
         if !self.manages_service_by_uuid(service_uuid).await {
             let service_id = service_info.id.clone();
@@ -467,12 +468,12 @@ impl ServiceManager {
 
     pub async fn run_task(
         &self,
-        service: &dyn Service,
+        service_info: &ServiceInfo,
         task: LifetimedPinnedBoxedFutureResult<'static, ()>,
     ) -> Result<(), RunTaskError> {
-        let service_uuid = service.info().uuid;
-        let service_id = service.info().id.clone();
-        let service_status = service.info().status.get();
+        let service_uuid = service_info.uuid;
+        let service_id = service_info.id.clone();
+        let service_status = service_info.status.get();
 
         if service_status != Status::Starting && service_status != Status::Started {
             return Err(RunTaskError::ServiceNotStarted(service_id, service_uuid));
@@ -490,7 +491,6 @@ impl ServiceManager {
         };
 
         let service_uuid_clone = service_uuid;
-        let service_id = service.info().id.clone();
         let mut taskchain = Taskchain::new(task);
         //TODO: When Rust allows async closures, refactor this to have the "async" keyword after the "move" keyword
         taskchain.append(move |result| async move {
