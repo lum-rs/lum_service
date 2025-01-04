@@ -9,7 +9,7 @@ use lum_libs::{
     },
     uuid::Uuid,
 };
-use lum_log::{error, info};
+use lum_log::{error, info, warn};
 
 use crate::{service::ServiceInfo, taskchain::Taskchain, types::RunTaskError};
 
@@ -19,15 +19,11 @@ use super::{
 };
 
 use std::{
-    collections::HashMap,
-    fmt::{self, Display},
-    mem,
-    sync::{Arc, OnceLock, Weak},
-    time::Duration,
+    collections::HashMap, fmt::{self, Display}, mem, sync::{Arc, OnceLock, Weak}, time::Duration
 };
 
 pub struct ServiceManager {
-    pub services: Vec<Arc<Mutex<dyn Service>>>,
+    pub services: HashMap<Uuid, Arc<Mutex<dyn Service>>>,
     pub on_status_change: Arc<EventRepeater<Status>>,
 
     weak: OnceLock<Weak<Self>>,
@@ -36,9 +32,35 @@ pub struct ServiceManager {
 
 impl ServiceManager {
     pub async fn new(services: Vec<Arc<Mutex<dyn Service>>>) -> Arc<Self> {
+        let mut services_map: HashMap<Uuid, Arc<Mutex<dyn Service>>> = HashMap::new(); //TODO: Drop type annotation
+
+        //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
+        for service in services.into_iter() {
+            let service_lock = service.lock().await;
+            let service_info = service_lock.info();
+            let service_uuid = service_info.uuid;
+
+            let existing_service = services_map.get(&service_uuid);
+            if let Some(existing_service) = existing_service {
+                let existing_service_lock = existing_service.lock().await;
+                let existing_service_info = existing_service_lock.info();
+
+                warn!(
+                    "ServiceManager::new() was given service {} ({}) with the same UUID as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
+                    service_info.id, service_uuid,
+                    existing_service_info.id, existing_service_info.uuid,
+                    service_info.id, service_uuid
+                );
+
+                continue;
+            }
+
+            services_map.insert(service_uuid, service.clone());
+        }
+
         let service_manager = ServiceManager {
             weak: OnceLock::new(),
-            services,
+            services: services_map,
             background_tasks: Mutex::new(HashMap::new()),
             on_status_change: EventRepeater::new("service_manager_on_status_change").await,
         };
@@ -67,8 +89,7 @@ impl ServiceManager {
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
 
-
-        if !self.manages_service_by_uuid(service_uuid).await {
+        if !self.manages_service_by_uuid(service_uuid) {
             let service_id = service_info.id.clone();
             return Err(StartupError::ServiceNotManaged(service_id, *service_uuid));
         }
@@ -113,7 +134,7 @@ impl ServiceManager {
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
 
-        if !(self.manages_service_by_uuid(service_uuid).await) {
+        if !(self.manages_service_by_uuid(service_uuid)) {
             let service_id = service_info.id.clone();
             return Err(ShutdownError::ServiceNotManaged(service_id, *service_uuid));
         }
@@ -149,9 +170,9 @@ impl ServiceManager {
     pub async fn start_services(&self) -> Vec<Result<(), StartupError>> {
         let mut results = Vec::new();
 
-        for service in &self.services {
-            let service_arc_clone = Arc::clone(service);
-            let result = self.start_service(service_arc_clone).await;
+        for pair in &self.services {
+            let service = pair.1.clone();
+            let result = self.start_service(service).await;
 
             results.push(result);
         }
@@ -162,9 +183,9 @@ impl ServiceManager {
     pub async fn stop_services(&self) -> Vec<Result<(), ShutdownError>> {
         let mut results = Vec::new();
 
-        for service in &self.services {
-            let service_arc_clone = Arc::clone(service);
-            let result = self.stop_service(service_arc_clone).await;
+        for pair in &self.services {
+            let service = pair.1.clone();
+            let result = self.stop_service(service).await;
 
             results.push(result);
         }
@@ -181,7 +202,8 @@ impl ServiceManager {
     where
         T: Service,
     {
-        for service in self.services.iter() {
+        for pair in self.services.iter() {
+            let service = pair.1;
             let lock = service.lock().await;
 
             let is_t = lock.as_any().is::<T>();
@@ -198,28 +220,19 @@ impl ServiceManager {
         None
     }
 
-    pub async fn get_service_by_uuid(&self, uuid: &Uuid) -> Option<Arc<Mutex<dyn Service>>> {
-        for service in self.services.iter() {
-            let service_lock = service.lock().await;
-
-            if service_lock.info().uuid == *uuid {
-                return Some(Arc::clone(service));
-            }
-        }
-
-        None
+    pub fn get_service_by_uuid(&self, uuid: &Uuid) -> Option<Arc<Mutex<dyn Service>>> {
+        self.services.get(uuid).map(Arc::clone)
     }
 
-    pub async fn manages_service_by_uuid(&self, uuid: &Uuid) -> bool {
-        self.get_service_by_uuid(uuid).await.is_some()
+    pub fn manages_service_by_uuid(&self, uuid: &Uuid) -> bool {
+        self.get_service_by_uuid(uuid).is_some()
     }
 
     pub async fn manages_service(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
         let service_lock = service.lock().await;
         let uuid = service_lock.info().uuid;
-        drop(service_lock); //Avoids deadlock because manages_service_by_uuid also locks the service
 
-        self.manages_service_by_uuid(&uuid).await
+        self.manages_service_by_uuid(&uuid)
     }
 
     pub async fn has_background_tasks_by_uuid(&self, uuid: &Uuid) -> bool {
@@ -245,14 +258,16 @@ impl ServiceManager {
 
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
     pub async fn health(&self) -> Health {
-        for service in self.services.iter() {
-            let service = service.lock().await;
+        for pair in self.services.iter() {
+            let service = pair.1;
+            let lock = service.lock().await;
+            let service_info = lock.info();
 
-            if service.info().priority != Priority::Essential {
+            if service_info.priority != Priority::Essential {
                 continue;
             }
 
-            let status = service.info().status.get();
+            let status = service_info.status.get();
             if status != Status::Started {
                 return Health::Unhealthy;
             }
@@ -261,6 +276,7 @@ impl ServiceManager {
         Health::Healthy
     }
 
+    //TODO: Remove?
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
     pub async fn status_overview(&self) -> String {
         let mut text_buffer = String::new();
@@ -271,33 +287,35 @@ impl ServiceManager {
         let mut non_failed_optionals = Vec::new();
         let mut others = Vec::new();
 
-        for service in self.services.iter() {
-            let service = service.lock().await;
-            let info = service.info();
-            let priority = &info.priority;
-            let status = info.status.get();
+        for pair in self.services.iter() {
+            let service = pair.1;
+            let lock = service.lock().await;
+            let service_info = lock.info();
+            let status = service_info.status.get();
+            let priority = service_info.priority;
+            let name = service_info.name.as_str();
 
             match status {
                 Status::Started | Status::Stopped => match priority {
                     Priority::Essential => {
-                        non_failed_essentials.push(format!(" - {}: {}", info.name, status));
+                        non_failed_essentials.push(format!(" - {}: {}", name, status));
                     }
                     Priority::Optional => {
-                        non_failed_optionals.push(format!(" - {}: {}", info.name, status));
+                        non_failed_optionals.push(format!(" - {}: {}", name, status));
                     }
                 },
                 Status::FailedToStart(_) | Status::FailedToStop(_) | Status::RuntimeError(_) => {
                     match priority {
                         Priority::Essential => {
-                            failed_essentials.push(format!(" - {}: {}", info.name, status));
+                            failed_essentials.push(format!(" - {}: {}", name, status));
                         }
                         Priority::Optional => {
-                            failed_optionals.push(format!(" - {}: {}", info.name, status));
+                            failed_optionals.push(format!(" - {}: {}", name, status));
                         }
                     }
                 }
                 _ => {
-                    others.push(format!(" - {}: {}", info.name, status));
+                    others.push(format!(" - {}: {}", name, status));
                 }
             }
         }
@@ -511,7 +529,7 @@ impl ServiceManager {
                 }
             };
 
-            let service = match service_manager_arc.get_service_by_uuid(&service_uuid).await {
+            let service = match service_manager_arc.get_service_by_uuid(&service_uuid) {
                 Some(service) => service,
                 None => {
                     error!(
@@ -586,7 +604,7 @@ impl Display for ServiceManager {
         }
 
         let mut services = self.services.iter().peekable();
-        while let Some(service) = services.next() {
+        while let Some((_, service)) = services.next() {
             let service = service.blocking_lock();
             let service_info = service.info();
 
