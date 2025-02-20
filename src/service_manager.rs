@@ -19,7 +19,11 @@ use super::{
 };
 
 use std::{
-    collections::HashMap, fmt::{self, Display}, mem, sync::{Arc, OnceLock, Weak}, time::Duration
+    collections::HashMap,
+    fmt::{self, Display},
+    mem,
+    sync::{Arc, OnceLock, Weak},
+    time::Duration,
 };
 
 pub struct ServiceManager {
@@ -47,9 +51,12 @@ impl ServiceManager {
 
                 warn!(
                     "ServiceManager::new() was given service {} ({}) with the same UUID as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
-                    service_info.id, service_uuid,
-                    existing_service_info.id, existing_service_info.uuid,
-                    service_info.id, service_uuid
+                    service_info.id,
+                    service_uuid,
+                    existing_service_info.id,
+                    existing_service_info.uuid,
+                    service_info.id,
+                    service_uuid
                 );
 
                 continue;
@@ -70,7 +77,9 @@ impl ServiceManager {
 
         let result = arc.weak.set(weak);
         if result.is_err() {
-            error!("Failed to set ServiceManager's Weak self-reference because it was already set. This should never happen. Panicking to prevent further undefined behavior.");
+            error!(
+                "Failed to set ServiceManager's Weak self-reference because it was already set. This should never happen. Panicking to prevent further undefined behavior."
+            );
             unreachable!(
                 "Failed to set ServiceManager's Weak self-reference because it was already set."
             );
@@ -368,7 +377,10 @@ impl ServiceManager {
             None => {
                 let service_uuid = service.info().uuid;
                 let service_id = service.info().id.clone();
-                error!("ServiceManager's Weak self-reference was None while initializing service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.", service_id, service_uuid);
+                error!(
+                    "ServiceManager's Weak self-reference was None while initializing service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
+                    service_id, service_uuid
+                );
                 panic!(
                     "ServiceManager's Weak self-reference was None while initializing service {} ({}).",
                     service_id, service_uuid
@@ -382,8 +394,14 @@ impl ServiceManager {
             None => {
                 let service_uuid = service.info().uuid;
                 let service_id = service.info().id.clone();
-                error!("ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}). This should never happen. Shutting down ungracefully to prevent further undefined behavior.", service_id, service_uuid);
-                unreachable!("ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}).", service_id, service_uuid);
+                error!(
+                    "ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}). This should never happen. Shutting down ungracefully to prevent further undefined behavior.",
+                    service_id, service_uuid
+                );
+                unreachable!(
+                    "ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}).",
+                    service_id, service_uuid
+                );
             }
         };
 
@@ -475,7 +493,7 @@ impl ServiceManager {
         self.abort_background_tasks(service).await;
 
         let message = message.into();
-        
+
         service.fail(&message).await;
         service
             .info_mut()
@@ -500,7 +518,10 @@ impl ServiceManager {
         let service_manager_weak = match self.weak.get() {
             Some(weak) => weak.clone(),
             None => {
-                error!("ServiceManager's Weak self-reference was None while running a task for service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.", service_id, service_uuid);
+                error!(
+                    "ServiceManager's Weak self-reference was None while running a task for service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
+                    service_id, service_uuid
+                );
                 panic!(
                     "ServiceManager's Weak self-reference was None while running a task for service {} ({}).",
                     service_id, service_uuid
@@ -525,7 +546,7 @@ impl ServiceManager {
                     panic!(
                         "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped.",
                         service_id, service_uuid
-                    );     
+                    );
                 }
             };
 

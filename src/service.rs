@@ -1,14 +1,10 @@
-use std::{
-    cmp::Ordering,
-    sync::{Arc, Weak},
-};
+use std::{cmp::Ordering, sync::Arc};
 
 use lum_boxtypes::{BoxedError, PinnedBoxedFuture};
 use lum_event::Observable;
 use lum_libs::{
     async_trait::async_trait,
-    downcast_rs::{impl_downcast, DowncastSync},
-    tokio::sync::Mutex,
+    downcast_rs::{DowncastSync, impl_downcast},
     uuid::Uuid,
 };
 
