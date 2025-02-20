@@ -1156,12 +1156,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f186d840b630ccb87d23408e975c91f4c1183751e5644b2d498a5235ed5e244"
 
 [[package]]
+name = "lum_boxtypes"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00c9a14a5387c0faeeb886b4077708b1f4dc9c24fb4880149626124f7de982d0"
+
+[[package]]
 name = "lum_event"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "64f71581811223612079f783a5346320ffe5f0a176c716eb3ffa151d2fc37c7b"
 dependencies = [
- "lum_boxtypes",
+ "lum_boxtypes 0.1.1",
  "lum_libs",
  "lum_log",
  "thiserror 2.0.3",
@@ -1203,7 +1209,7 @@ dependencies = [
 name = "lum_service"
 version = "0.1.0"
 dependencies = [
- "lum_boxtypes",
+ "lum_boxtypes 0.2.0",
  "lum_event",
  "lum_libs",
  "lum_log",
