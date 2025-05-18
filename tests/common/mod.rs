@@ -16,9 +16,8 @@ use lum_service::{
 pub struct DummyService {
     pub on_start: Event<()>,
     pub on_stop: Event<()>,
-    pub on_task_started: Event<()>,
-    pub on_failed: Event<String>,
-
+    //pub on_task_started: Event<()>,
+    //pub on_failed: Event<String>,
     info: ServiceInfo,
 }
 
@@ -28,9 +27,8 @@ impl DummyService {
         let dummy_service = Self {
             on_start: Event::new(format!("{}::on_start", name)),
             on_stop: Event::new(format!("{}::on_stop", name)),
-            on_task_started: Event::new(format!("{}::on_task_started", name)),
-            on_failed: Event::new(format!("{}::on_failed", name)),
-
+            //on_task_started: Event::new(format!("{}::on_task_started", name)),
+            //on_failed: Event::new(format!("{}::on_failed", name)),
             info: ServiceInfo::new(name, "DummyService", Priority::Essential),
         };
 
