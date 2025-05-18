@@ -1117,7 +1117,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fc2f4eb4bc735547cfed7c0a4922cbd04a4655978c09b54f1f7b228750664c34"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.6",
 ]
 
 [[package]]
@@ -1203,12 +1203,11 @@ dependencies = [
 
 [[package]]
 name = "lum_log"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "120ab4a63836a5a645d8c66e1cf2ade605dccb020220af3f7e2e19acc0577e8b"
+checksum = "e442a77c1d56969236dc519a2a495301dae0c9cd63785ccd92540b59892c7f0d"
 dependencies = [
  "lum_libs",
- "serde",
 ]
 
 [[package]]
