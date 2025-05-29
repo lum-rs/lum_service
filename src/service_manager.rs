@@ -492,7 +492,8 @@ impl ServiceManager {
         service.info_mut().status.set(Status::Failing).await;
         self.abort_background_tasks(service).await;
 
-        let message = message.into();
+        // TODO: This compiles without type annotation, but rust-analyzer complains about it :/
+        let message: String = message.into();
 
         service.fail(&message).await;
         service

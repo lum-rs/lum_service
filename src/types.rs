@@ -1,7 +1,8 @@
 use std::fmt::{self, Display};
 
 use lum_event::event_repeater::{AttachError, DetachError};
-use lum_libs::{thiserror::Error, uuid::Uuid};
+use lum_libs::uuid::Uuid;
+use thiserror::Error;
 
 #[derive(Debug, Clone)]
 pub enum Status {
