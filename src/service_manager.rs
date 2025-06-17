@@ -389,6 +389,7 @@ impl ServiceManager {
         };
 
         // This can't fail now because the Arc is guaranteed to be valid as long as &self is valid. We do error handling just in case.
+        // TODO: Do not upgrade Weak to Arc here, but rather pass Weak to the service and let it upgrade it when needed.
         let service_manager_arc = match service_manager_weak.upgrade() {
             Some(arc) => arc,
             None => {
