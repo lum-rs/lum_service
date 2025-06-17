@@ -239,9 +239,9 @@ checksum = "00c9a14a5387c0faeeb886b4077708b1f4dc9c24fb4880149626124f7de982d0"
 
 [[package]]
 name = "lum_event"
-version = "0.2.2"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d828326561ec535f9ab7e9eb12f97dfbfffe20361bf3591e670cd281315c8da2"
+checksum = "244fe83d1b43eca4e149393d8a89580c6deb686f5d9f0eb767255e38d2b3517e"
 dependencies = [
  "lum_boxtypes",
  "lum_libs",
@@ -267,9 +267,9 @@ dependencies = [
 
 [[package]]
 name = "lum_log"
-version = "0.2.3"
+version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f5ff53d11fa0f4700f1a613993da39caed49ac73601d93570a94c2febd3d33f"
+checksum = "ae2aa8a9e10a382f3c41d280ef3a47277444ac311cc77ac99b8ba14c40d667ec"
 dependencies = [
  "lum_libs",
 ]
