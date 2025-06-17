@@ -23,7 +23,7 @@ lto = false
 
 [dependencies]
 lum_boxtypes = "0.2.0"
-lum_event = "0.2.2"
+lum_event = "0.2.4"
 lum_libs = { version = "0.2.5", features = ["async-trait", "downcast-rs", "fern", "humantime", "log", "serde", "tokio", "uuid"] }
 lum_log = "0.2.6"
 thiserror = "2.0.12"
