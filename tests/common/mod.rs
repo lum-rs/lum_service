@@ -23,13 +23,13 @@ pub struct DummyService {
 
 impl DummyService {
     pub fn new() -> Self {
-        let name = "dummy-service";
+        let name = "DummyService";
         let dummy_service = Self {
-            on_start: Event::new(format!("{}::on_start", name)),
-            on_stop: Event::new(format!("{}::on_stop", name)),
-            //on_task_started: Event::new(format!("{}::on_task_started", name)),
-            //on_failed: Event::new(format!("{}::on_failed", name)),
-            info: ServiceInfo::new(name, "DummyService", Priority::Essential),
+            on_start: Event::new(format!("{name}::on_start")),
+            on_stop: Event::new(format!("{name}::on_stop")),
+            //on_task_started: Event::new(format!("{name}::on_task_started")),
+            //on_failed: Event::new(format!("{name}::on_failed")),
+            info: ServiceInfo::new(name, Priority::Essential),
         };
 
         info!("DummyService created");

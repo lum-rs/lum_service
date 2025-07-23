@@ -51,14 +51,13 @@ impl ServiceManager {
 
                 warn!(
                     "ServiceManager::new() was given service {} ({}) with the same UUID as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
-                    service_info.id,
+                    service_info.name,
                     service_uuid,
-                    existing_service_info.id,
+                    existing_service_info.name,
                     existing_service_info.uuid,
-                    service_info.id,
+                    service_info.name,
                     service_uuid
                 );
-
                 continue;
             }
 
@@ -95,23 +94,21 @@ impl ServiceManager {
         let mut service_lock = service.lock().await;
 
         let service_info = service_lock.info();
+        let service_name = service_info.name.clone();
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
 
         if !self.manages_service_by_uuid(service_uuid) {
-            let service_id = service_info.id.clone();
-            return Err(StartupError::ServiceNotManaged(service_id, *service_uuid));
+            return Err(StartupError::ServiceNotManaged(service_name, *service_uuid));
         }
 
         if service_status.get() != Status::Stopped {
-            let service_id = service_info.id.clone();
-            return Err(StartupError::ServiceNotStopped(service_id, *service_uuid));
+            return Err(StartupError::ServiceNotStopped(service_name, *service_uuid));
         }
 
         if self.has_background_tasks_by_uuid(service_uuid).await {
-            let service_id = service_info.id.clone();
             return Err(StartupError::BackgroundTaskAlreadyRunning(
-                service_id,
+                service_name,
                 *service_uuid,
             ));
         }
@@ -119,16 +116,15 @@ impl ServiceManager {
         let service_status_event = &service_status.on_change;
         let attachment_result = self.on_status_change.attach(service_status_event, 10).await;
         if let Err(err) = attachment_result {
-            let service_id = service_info.id.clone();
             return Err(StartupError::StatusAttachmentFailed(
-                service_id,
+                service_name,
                 *service_uuid,
                 err,
             ));
         }
 
         self.init_service(&mut service_lock).await?;
-        info!("Started service {}", service_lock.info().id); //Reacquire references to allow above mutable borrow
+        info!("Started service {service_name}");
 
         Ok(())
     }
@@ -140,45 +136,49 @@ impl ServiceManager {
         let mut service_lock = service.lock().await;
 
         let service_info = service_lock.info();
+        let service_name = service_info.name.as_str();
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
 
         if !(self.manages_service_by_uuid(service_uuid)) {
-            let service_id = service_info.id.clone();
-            return Err(ShutdownError::ServiceNotManaged(service_id, *service_uuid));
+            return Err(ShutdownError::ServiceNotManaged(
+                service_name.to_string(),
+                *service_uuid,
+            ));
         }
 
         if service_status.get() != Status::Started {
-            let service_id = service_info.id.clone();
-            return Err(ShutdownError::ServiceNotStarted(service_id, *service_uuid));
+            return Err(ShutdownError::ServiceNotStarted(
+                service_name.to_string(),
+                *service_uuid,
+            ));
         }
 
         self.shutdown_service(&mut service_lock).await?;
 
-        //Reacquire references to allow above mutable borrow
+        // Reacquire reference to change it from mutable to immutable
         let service_info = service_lock.info();
+        let service_name = service_info.name.as_str();
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
 
         let service_status_event = service_status.as_ref();
         let detach_result = self.on_status_change.detach(service_status_event).await;
         if let Err(err) = detach_result {
-            let service_id = service_info.id.clone();
             return Err(ShutdownError::StatusDetachmentFailed(
-                service_id,
+                service_name.to_string(),
                 *service_uuid,
                 err,
             ));
         }
 
-        info!("Stopped service {}", service_info.id);
+        info!("Stopped service {service_name}");
 
         Ok(())
     }
 
     pub async fn start_services(&self) -> Vec<Result<(), StartupError>> {
         let mut results = Vec::new();
-
         for pair in &self.services {
             let service = pair.1.clone();
             let result = self.start_service(service).await;
@@ -191,7 +191,6 @@ impl ServiceManager {
 
     pub async fn stop_services(&self) -> Vec<Result<(), ShutdownError>> {
         let mut results = Vec::new();
-
         for pair in &self.services {
             let service = pair.1.clone();
             let result = self.stop_service(service).await;
@@ -375,15 +374,16 @@ impl ServiceManager {
         let service_manager_weak = match self.weak.get() {
             Some(weak) => weak,
             None => {
-                let service_uuid = service.info().uuid;
-                let service_id = service.info().id.clone();
+                let service_info = service.info();
+                let service_name = service_info.name.as_str();
+                let service_uuid = &service.info().uuid;
                 error!(
                     "ServiceManager's Weak self-reference was None while initializing service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
-                    service_id, service_uuid
+                    service_name, service_uuid
                 );
                 panic!(
                     "ServiceManager's Weak self-reference was None while initializing service {} ({}).",
-                    service_id, service_uuid
+                    service_name, service_uuid
                 );
             }
         };
@@ -393,15 +393,16 @@ impl ServiceManager {
         let service_manager_arc = match service_manager_weak.upgrade() {
             Some(arc) => arc,
             None => {
-                let service_uuid = service.info().uuid;
-                let service_id = service.info().id.clone();
+                let service_info = service.info();
+                let service_name = service_info.name.as_str();
+                let service_uuid = &service_info.uuid;
                 error!(
                     "ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}). This should never happen. Shutting down ungracefully to prevent further undefined behavior.",
-                    service_id, service_uuid
+                    service_name, service_uuid
                 );
                 unreachable!(
                     "ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}).",
-                    service_id, service_uuid
+                    service_name, service_uuid
                 );
             }
         };
@@ -422,10 +423,13 @@ impl ServiceManager {
                         .status
                         .set(Status::FailedToStart(error.to_string()))
                         .await;
-                    let service_id = service_info.id.clone();
-                    let service_uuid = service_info.uuid;
 
-                    return Err(StartupError::FailedToStartService(service_id, service_uuid));
+                    let service_name = service_info.name.clone();
+                    let service_uuid = service_info.uuid;
+                    return Err(StartupError::FailedToStartService(
+                        service_name,
+                        service_uuid,
+                    ));
                 }
             },
             Err(error) => {
@@ -433,10 +437,13 @@ impl ServiceManager {
                     .status
                     .set(Status::FailedToStart(error.to_string()))
                     .await;
-                let service_id = service_info.id.clone();
-                let service_uuid = service_info.uuid;
 
-                return Err(StartupError::FailedToStartService(service_id, service_uuid));
+                let service_name = service_info.name.clone();
+                let service_uuid = service_info.uuid;
+                return Err(StartupError::FailedToStartService(
+                    service_name,
+                    service_uuid,
+                ));
             }
         }
 
@@ -464,10 +471,13 @@ impl ServiceManager {
                         .status
                         .set(Status::FailedToStop(error.to_string()))
                         .await;
-                    let service_id = service_info.id.clone();
-                    let service_uuid = service_info.uuid;
 
-                    return Err(ShutdownError::FailedToStopService(service_id, service_uuid));
+                    let service_name = service_info.name.clone();
+                    let service_uuid = service_info.uuid;
+                    return Err(ShutdownError::FailedToStopService(
+                        service_name,
+                        service_uuid,
+                    ));
                 }
             },
             Err(error) => {
@@ -475,10 +485,13 @@ impl ServiceManager {
                     .status
                     .set(Status::FailedToStop(error.to_string()))
                     .await;
-                let service_id = service_info.id.clone();
-                let service_uuid = service_info.uuid;
 
-                return Err(ShutdownError::FailedToStopService(service_id, service_uuid));
+                let service_name = service_info.name.clone();
+                let service_uuid = service_info.uuid;
+                return Err(ShutdownError::FailedToStopService(
+                    service_name,
+                    service_uuid,
+                ));
             }
         }
 
@@ -509,12 +522,12 @@ impl ServiceManager {
         service_info: &ServiceInfo,
         task: LifetimedPinnedBoxedFutureResult<'static, ()>,
     ) -> Result<(), RunTaskError> {
+        let service_name = service_info.name.clone();
         let service_uuid = service_info.uuid;
-        let service_id = service_info.id.clone();
         let service_status = service_info.status.get();
 
         if service_status != Status::Starting && service_status != Status::Started {
-            return Err(RunTaskError::ServiceNotStarted(service_id, service_uuid));
+            return Err(RunTaskError::ServiceNotStarted(service_name, service_uuid));
         }
 
         let service_manager_weak = match self.weak.get() {
@@ -522,11 +535,11 @@ impl ServiceManager {
             None => {
                 error!(
                     "ServiceManager's Weak self-reference was None while running a task for service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
-                    service_id, service_uuid
+                    service_name, service_uuid
                 );
                 panic!(
                     "ServiceManager's Weak self-reference was None while running a task for service {} ({}).",
-                    service_id, service_uuid
+                    service_name, service_uuid
                 );
             }
         };
@@ -536,18 +549,19 @@ impl ServiceManager {
         //TODO: When Rust allows async closures, refactor this to have the "async" keyword after the "move" keyword
         taskchain.append(move |result| async move {
             let service_manager_weak = service_manager_weak;
+            let service_name = service_name.clone();
             let service_uuid = service_uuid_clone;
-            let service_id = service_id;
 
             let service_manager_arc = match service_manager_weak.upgrade() {
                 Some(arc) => arc,
                 None => {
                     error!(
                         "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior.",
-                        service_id, service_uuid);
+                        service_name, service_uuid
+                    );
                     panic!(
                         "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped.",
-                        service_id, service_uuid
+                        service_name, service_uuid
                     );
                 }
             };
@@ -557,11 +571,11 @@ impl ServiceManager {
                 None => {
                     error!(
                         "A task of a service {} ({}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior.",
-                        service_id, service_uuid
+                        service_name, service_uuid
                     );
                     panic!(
                         "A task of a service {} ({}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running?",
-                        service_id, service_uuid
+                        service_name, service_uuid
                     );
                 }
             };
@@ -571,7 +585,7 @@ impl ServiceManager {
                 Ok(()) => {
                     error!(
                         "Background task of service {} ({}) ended unexpectedly! Service will be marked as failed.",
-                        service_id, service_uuid
+                        service_name, service_uuid
                     );
 
                     service_manager_arc.fail_service(&mut service_lock, "Background task ended unexpectedly!").await;
@@ -580,7 +594,7 @@ impl ServiceManager {
                 Err(error) => {
                     error!(
                         "Background task of service {} ({}) ended with error: {}. Service will be marked as failed.",
-                        service_id, service_uuid,
+                        service_name, service_uuid,
                         error
                     );
 

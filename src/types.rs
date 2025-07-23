@@ -87,6 +87,7 @@ pub enum StartupError {
     #[error("Service {0} ({1}) is not stopped")]
     ServiceNotStopped(String, Uuid),
 
+    //TODO: BackgroundTaskRunning(String, Uuid, int32): Service {0} ({1}) has {2} background tasks running
     #[error("Service {0} ({1}) already has a background task running")]
     BackgroundTaskAlreadyRunning(String, Uuid),
 
