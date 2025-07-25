@@ -68,7 +68,7 @@ impl ServiceManager {
             weak: OnceLock::new(),
             services: services_map,
             background_tasks: Mutex::new(HashMap::new()),
-            on_status_change: EventRepeater::new("service_manager_on_status_change").await,
+            on_status_change: EventRepeater::new("ServiceManager::on_status_change").await,
         };
 
         let arc = Arc::new(service_manager);
@@ -76,6 +76,7 @@ impl ServiceManager {
 
         let result = arc.weak.set(weak);
         if result.is_err() {
+            //TODO: use error_and_panic! when implemented in lum_log
             error!(
                 "Failed to set ServiceManager's Weak self-reference because it was already set. This should never happen. Panicking to prevent further undefined behavior."
             );
@@ -162,7 +163,7 @@ impl ServiceManager {
 
         self.shutdown_service(&mut service_lock).await?;
 
-        // Reacquire reference to allow above mutable borrow
+        // Reacquiring to allow above mutable borrow
         let service_info = service_lock.info();
         let service_name = service_info.name.as_str();
         let service_uuid = &service_info.uuid;
@@ -335,27 +336,27 @@ impl ServiceManager {
         }
 
         if !failed_essentials.is_empty() {
-            text_buffer.push_str(&format!("{}:\n", "Failed essential services"));
+            text_buffer.push_str("Failed essential services:\n");
             text_buffer.push_str(failed_essentials.join("\n").as_str());
         }
 
         if !failed_optionals.is_empty() {
-            text_buffer.push_str(&format!("{}:\n", "Failed optional services"));
+            text_buffer.push_str("Failed optional services:\n");
             text_buffer.push_str(failed_optionals.join("\n").as_str());
         }
 
         if !non_failed_essentials.is_empty() {
-            text_buffer.push_str(&format!("{}:\n", "Essential services"));
+            text_buffer.push_str("Essential services:\n");
             text_buffer.push_str(non_failed_essentials.join("\n").as_str());
         }
 
         if !non_failed_optionals.is_empty() {
-            text_buffer.push_str(&format!("{}:\n", "Optional services"));
+            text_buffer.push_str("Optional services:\n");
             text_buffer.push_str(non_failed_optionals.join("\n").as_str());
         }
 
         if !others.is_empty() {
-            text_buffer.push_str(&format!("{}:\n", "Other services"));
+            text_buffer.push_str("Other services:\n");
             text_buffer.push_str(others.join("\n").as_str());
         }
 
@@ -384,8 +385,7 @@ impl ServiceManager {
                 let service_name = service_info.name.as_str();
                 let service_uuid = &service.info().uuid;
                 error!(
-                    "ServiceManager's Weak self-reference was None while initializing service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
-                    service_name, service_uuid
+                    "ServiceManager's Weak self-reference was None while initializing service {service_name} ({service_uuid}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
                 );
                 panic!(
                     "ServiceManager's Weak self-reference was None while initializing service {service_name} ({service_uuid})."
@@ -393,27 +393,8 @@ impl ServiceManager {
             }
         };
 
-        // This can't fail now because the Arc is guaranteed to be valid as long as &self is valid. We do error handling just in case.
-        // TODO: Do not upgrade Weak to Arc here, but rather pass Weak to the service and let it upgrade it when needed.
-        let service_manager_arc = match service_manager_weak.upgrade() {
-            Some(arc) => arc,
-            None => {
-                let service_info = service.info();
-                let service_name = service_info.name.as_str();
-                let service_uuid = &service_info.uuid;
-                error!(
-                    "ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}). This should never happen. Shutting down ungracefully to prevent further undefined behavior.",
-                    service_name, service_uuid
-                );
-                unreachable!(
-                    "ServiceManager's Weak self-reference could not be upgraded to Arc while initializing service {} ({}).",
-                    service_name, service_uuid
-                );
-            }
-        };
-
         service.info_mut().status.set(Status::Starting).await;
-        let start = service.start(service_manager_arc);
+        let start = service.start(service_manager_weak.clone());
         let timeout_result = timeout(Duration::from_secs(10), start).await; //TODO: Add to config instead of hardcoding duration
 
         //TODO: Merge all cases into enum with variants "Ok", "Err", and "Timeout"
@@ -535,12 +516,13 @@ impl ServiceManager {
             return Err(RunTaskError::ServiceNotStarted(service_name, service_uuid));
         }
 
+        //TODO: implement get_weak() in ServiceManager
         let service_manager_weak = match self.weak.get() {
             Some(weak) => weak.clone(),
             None => {
+                //TODO: use error_and_panic! when implemented in lum_log
                 error!(
-                    "ServiceManager's Weak self-reference was None while running a task for service {} ({}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior.",
-                    service_name, service_uuid
+                    "ServiceManager's Weak self-reference was None while running a task for service {service_name} ({service_uuid}). This should never happen. Did you not use a ServiceManager::new()? Panicking to prevent further undefined behavior."
                 );
                 panic!(
                     "ServiceManager's Weak self-reference was None while running a task for service {service_name} ({service_uuid})."
@@ -548,20 +530,18 @@ impl ServiceManager {
             }
         };
 
-        let service_uuid_clone = service_uuid;
         let mut taskchain = Taskchain::new(task);
         //TODO: When Rust allows async closures, refactor this to have the "async" keyword after the "move" keyword
         taskchain.append(move |result| async move {
             let service_manager_weak = service_manager_weak;
             let service_name = service_name.clone();
-            let service_uuid = service_uuid_clone;
+            let service_uuid = service_uuid;
 
             let service_manager_arc = match service_manager_weak.upgrade() {
                 Some(arc) => arc,
                 None => {
                     error!(
-                        "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior.",
-                        service_name, service_uuid
+                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior."
                     );
                     panic!(
                         "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped."
@@ -573,8 +553,7 @@ impl ServiceManager {
                 Some(service) => service,
                 None => {
                     error!(
-                        "A task of a service {} ({}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior.",
-                        service_name, service_uuid
+                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior."
                     );
                     panic!(
                         "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running?"
@@ -586,8 +565,7 @@ impl ServiceManager {
             match result {
                 Ok(()) => {
                     error!(
-                        "Background task of service {} ({}) ended unexpectedly! Service will be marked as failed.",
-                        service_name, service_uuid
+                        "Background task of service {service_name} ({service_uuid}) ended unexpectedly! Service will be marked as failed."
                     );
 
                     service_manager_arc.fail_service(&mut service_lock, "Background task ended unexpectedly!").await;
@@ -595,9 +573,7 @@ impl ServiceManager {
 
                 Err(error) => {
                     error!(
-                        "Background task of service {} ({}) ended with error: {}. Service will be marked as failed.",
-                        service_name, service_uuid,
-                        error
+                        "Background task of service {service_name} ({service_uuid}) ended with error: {error}. Service will be marked as failed.",
                     );
 
                     service_manager_arc.fail_service(&mut service_lock, error.to_string()).await;

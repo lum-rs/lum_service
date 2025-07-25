@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Weak},
+    time::Duration,
+};
 
 use lum_boxtypes::{BoxedError, PinnedBoxedFuture};
 use lum_event::Event;
@@ -9,7 +12,7 @@ use lum_libs::{
 use lum_log::info;
 use lum_service::{
     service::{Service, ServiceInfo},
-    service_manager::ServiceManager,
+    service_manager::{self, ServiceManager},
     types::Priority,
 };
 
@@ -47,7 +50,7 @@ impl Service for DummyService {
         &mut self.info
     }
 
-    async fn start(&mut self, service_manager: Arc<ServiceManager>) -> Result<(), BoxedError> {
+    async fn start(&mut self, service_manager: Weak<ServiceManager>) -> Result<(), BoxedError> {
         info!("Starting DummyService");
 
         info!("Dispatching on_start event");
@@ -62,6 +65,10 @@ impl Service for DummyService {
         }
 
         info!("Running task");
+        let service_manager = match service_manager.upgrade() {
+            Some(manager) => manager,
+            None => return Err("Failed to upgrade ServiceManager".into()),
+        };
         service_manager
             .run_task(
                 &self.info,
