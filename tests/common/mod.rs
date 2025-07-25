@@ -12,7 +12,7 @@ use lum_libs::{
 use lum_log::info;
 use lum_service::{
     service::{Service, ServiceInfo},
-    service_manager::{self, ServiceManager},
+    service_manager::ServiceManager,
     types::Priority,
 };
 
