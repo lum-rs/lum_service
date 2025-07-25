@@ -23,10 +23,10 @@ impl Display for Status {
             Status::Started => write!(f, "Started"),
             Status::Stopping => write!(f, "Stopping"),
             Status::Stopped => write!(f, "Stopped"),
-            Status::FailedToStart(error) => write!(f, "Failed to start: {}", error),
-            Status::FailedToStop(error) => write!(f, "Failed to stop: {}", error),
+            Status::FailedToStart(error) => write!(f, "Failed to start: {error}"),
+            Status::FailedToStop(error) => write!(f, "Failed to stop: {error}"),
             Status::Failing => write!(f, "Failing"),
-            Status::RuntimeError(error) => write!(f, "Runtime error: {}", error),
+            Status::RuntimeError(error) => write!(f, "Runtime error: {error}"),
         }
     }
 }
