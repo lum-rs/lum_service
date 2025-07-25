@@ -16,7 +16,6 @@ use super::{
 #[derive(Debug)]
 pub struct ServiceInfo {
     pub uuid: Uuid,
-    pub id: String,
     pub name: String,
     pub priority: Priority,
 
@@ -24,13 +23,13 @@ pub struct ServiceInfo {
 }
 
 impl ServiceInfo {
-    pub fn new(id: &str, name: &str, priority: Priority) -> Self {
+    pub fn new(name: impl Into<String>, priority: Priority) -> Self {
+        let uuid = Uuid::new_v4();
         Self {
-            uuid: Uuid::new_v4(),
-            id: id.to_string(), //TODO: Drop?
-            name: name.to_string(),
+            uuid,
+            name: name.into(),
             priority,
-            status: Observable::new(Status::Stopped, format!("{}_status_change", id)),
+            status: Observable::new(Status::Stopped, format!("{}_status_change", uuid)),
         }
     }
 }
