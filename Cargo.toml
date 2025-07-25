@@ -25,5 +25,5 @@ lto = false
 lum_boxtypes = "0.2.1"
 lum_event = "0.2.8"
 lum_libs = { version = "0.2.6", features = ["async-trait", "downcast-rs", "fern", "humantime", "log", "serde", "tokio", "uuid"] }
-lum_log = "0.2.6"
+lum_log = "0.2.7"
 thiserror = "2.0.12"
