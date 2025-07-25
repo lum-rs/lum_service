@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, sync::Arc};
+use std::{cmp::Ordering, sync::Weak};
 
 use lum_boxtypes::{BoxedError, PinnedBoxedFuture};
 use lum_event::Observable;
@@ -58,12 +58,13 @@ impl PartialOrd for ServiceInfo {
 #[async_trait]
 pub trait Service: DowncastSync {
     fn info(&self) -> &ServiceInfo;
-    fn info_mut(&mut self) -> &mut ServiceInfo; //TODO: When lum_event offers SyncObservable, remove this
+    fn info_mut(&mut self) -> &mut ServiceInfo;
 
-    async fn start(&mut self, service_manager: Arc<ServiceManager>) -> Result<(), BoxedError>;
+    async fn start(&mut self, service_manager: Weak<ServiceManager>) -> Result<(), BoxedError>;
     async fn stop(&mut self) -> Result<(), BoxedError>;
+
+    //Can't rely on async_trait here, as it returns a non-Sync Future.
     fn fail(&mut self, _message: &str) -> PinnedBoxedFuture<()> {
-        //Can't rely on async_trait here, as it returns a non-Sync Future.
         Box::pin(async move {})
     }
 

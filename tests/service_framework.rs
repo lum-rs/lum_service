@@ -18,4 +18,9 @@ mod tests {
         info!("Forcing an await of 0ms to allow the task to print a message");
         sleep(Duration::from_millis(0)).await;
     }
+
+    //TODO: Add test for stop_services()
+    //TODO: Add tests for starting/stopping services multiple times
+    //TODO: Add test for ignoring services with same UUID
+    //TODO: Add test for get_service_by_type()
 }
