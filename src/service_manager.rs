@@ -94,21 +94,27 @@ impl ServiceManager {
         let mut service_lock = service.lock().await;
 
         let service_info = service_lock.info();
-        let service_name = service_info.name.clone();
+        let service_name = service_info.name.as_str();
         let service_uuid = &service_info.uuid;
         let service_status = &service_info.status;
 
         if !self.manages_service_by_uuid(service_uuid) {
-            return Err(StartupError::ServiceNotManaged(service_name, *service_uuid));
+            return Err(StartupError::ServiceNotManaged(
+                service_name.to_string(),
+                *service_uuid,
+            ));
         }
 
         if service_status.get() != Status::Stopped {
-            return Err(StartupError::ServiceNotStopped(service_name, *service_uuid));
+            return Err(StartupError::ServiceNotStopped(
+                service_name.to_string(),
+                *service_uuid,
+            ));
         }
 
         if self.has_background_tasks_by_uuid(service_uuid).await {
             return Err(StartupError::BackgroundTaskAlreadyRunning(
-                service_name,
+                service_name.to_string(),
                 *service_uuid,
             ));
         }
@@ -117,14 +123,14 @@ impl ServiceManager {
         let attachment_result = self.on_status_change.attach(service_status_event, 10).await;
         if let Err(err) = attachment_result {
             return Err(StartupError::StatusAttachmentFailed(
-                service_name,
+                service_name.to_string(),
                 *service_uuid,
                 err,
             ));
         }
 
         self.init_service(&mut service_lock).await?;
-        info!("Started service {service_name}");
+        info!("Started service {}", service_lock.info().name); // Reacquiring to allow above mutable borrow
 
         Ok(())
     }
@@ -156,7 +162,7 @@ impl ServiceManager {
 
         self.shutdown_service(&mut service_lock).await?;
 
-        // Reacquire reference to change it from mutable to immutable
+        // Reacquire reference to allow above mutable borrow
         let service_info = service_lock.info();
         let service_name = service_info.name.as_str();
         let service_uuid = &service_info.uuid;
