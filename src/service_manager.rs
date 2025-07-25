@@ -228,10 +228,7 @@ impl ServiceManager {
         Should you come up with a way to do this in safe rust, please make a PR! :)
         Anyways, this should never cause any issues, since we checked if the service is of type T
     */
-    pub async fn get_service_by_type<T>(&self) -> Option<Arc<Mutex<T>>>
-    where
-        T: Service,
-    {
+    pub async fn get_service_by_type<T: Service>(&self) -> Option<Arc<Mutex<T>>> {
         for pair in self.services.iter() {
             let service = pair.1;
             let lock = service.lock().await;
