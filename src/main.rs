@@ -1,5 +1,5 @@
 fn ぷりんとめっせじぇ(めっせじぇ: String) {
-    println!("{}", めっせじぇ);
+    println!("{めっせじぇ}");
 }
 
 fn main() {

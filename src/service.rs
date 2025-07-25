@@ -29,7 +29,7 @@ impl ServiceInfo {
             uuid,
             name: name.into(),
             priority,
-            status: Observable::new(Status::Stopped, format!("{}_status_change", uuid)),
+            status: Observable::new(Status::Stopped, format!("{uuid}::status_change")),
         }
     }
 }

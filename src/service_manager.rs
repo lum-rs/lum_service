@@ -312,24 +312,24 @@ impl ServiceManager {
             match status {
                 Status::Started | Status::Stopped => match priority {
                     Priority::Essential => {
-                        non_failed_essentials.push(format!(" - {}: {}", name, status));
+                        non_failed_essentials.push(format!(" - {name}: {status}"));
                     }
                     Priority::Optional => {
-                        non_failed_optionals.push(format!(" - {}: {}", name, status));
+                        non_failed_optionals.push(format!(" - {name}: {status}"));
                     }
                 },
                 Status::FailedToStart(_) | Status::FailedToStop(_) | Status::RuntimeError(_) => {
                     match priority {
                         Priority::Essential => {
-                            failed_essentials.push(format!(" - {}: {}", name, status));
+                            failed_essentials.push(format!(" - {name}: {status}"));
                         }
                         Priority::Optional => {
-                            failed_optionals.push(format!(" - {}: {}", name, status));
+                            failed_optionals.push(format!(" - {name}: {status}"));
                         }
                     }
                 }
                 _ => {
-                    others.push(format!(" - {}: {}", name, status));
+                    others.push(format!(" - {name}: {status}"));
                 }
             }
         }
@@ -388,8 +388,7 @@ impl ServiceManager {
                     service_name, service_uuid
                 );
                 panic!(
-                    "ServiceManager's Weak self-reference was None while initializing service {} ({}).",
-                    service_name, service_uuid
+                    "ServiceManager's Weak self-reference was None while initializing service {service_name} ({service_uuid})."
                 );
             }
         };
@@ -544,8 +543,7 @@ impl ServiceManager {
                     service_name, service_uuid
                 );
                 panic!(
-                    "ServiceManager's Weak self-reference was None while running a task for service {} ({}).",
-                    service_name, service_uuid
+                    "ServiceManager's Weak self-reference was None while running a task for service {service_name} ({service_uuid})."
                 );
             }
         };
@@ -566,8 +564,7 @@ impl ServiceManager {
                         service_name, service_uuid
                     );
                     panic!(
-                        "A task of a service {} ({}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped.",
-                        service_name, service_uuid
+                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped."
                     );
                 }
             };
@@ -580,8 +577,7 @@ impl ServiceManager {
                         service_name, service_uuid
                     );
                     panic!(
-                        "A task of a service {} ({}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running?",
-                        service_name, service_uuid
+                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running?"
                     );
                 }
             };
