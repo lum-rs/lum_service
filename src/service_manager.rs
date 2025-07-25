@@ -9,7 +9,7 @@ use lum_libs::{
     },
     uuid::Uuid,
 };
-use lum_log::{error, info, warn};
+use lum_log::{error, error_panic, error_unreachable, info, warn};
 
 use crate::{service::ServiceInfo, taskchain::Taskchain, types::RunTaskError};
 
@@ -76,12 +76,8 @@ impl ServiceManager {
 
         let result = arc.weak.set(weak);
         if result.is_err() {
-            //TODO: use error_and_panic! when implemented in lum_log
-            error!(
+            error_unreachable!(
                 "Failed to set ServiceManager's Weak self-reference because it was already set. This should never happen. Panicking to prevent further undefined behavior."
-            );
-            unreachable!(
-                "Failed to set ServiceManager's Weak self-reference because it was already set."
             );
         }
 
@@ -92,11 +88,9 @@ impl ServiceManager {
         match self.weak.get() {
             Some(weak) => weak.clone(),
             None => {
-                //TODO: use error_and_panic! when implemented in lum_log
-                error!(
+                error_panic!(
                     "ServiceManager's Weak self-reference was None when trying to access it. This should never happen. Panicking to prevent further undefined behavior."
                 );
-                panic!("ServiceManager's Weak self-reference was None when trying to access it.");
             }
         }
     }
@@ -524,12 +518,8 @@ impl ServiceManager {
             let service_manager = match service_manager_weak.upgrade() {
                 Some(arc) => arc,
                 None => {
-                    //TODO: use error_and_panic! when implemented in lum_log
-                    error!(
+                    error_panic!(
                         "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior."
-                    );
-                    panic!(
-                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped."
                     );
                 }
             };
@@ -537,12 +527,8 @@ impl ServiceManager {
             let service = match service_manager.get_service_by_uuid(&service_uuid) {
                 Some(service) => service,
                 None => {
-                    //TODO: use error_and_panic! when implemented in lum_log
-                    error!(
+                    error_panic!(
                         "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior."
-                    );
-                    panic!(
-                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running?"
                     );
                 }
             };
