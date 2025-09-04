@@ -54,7 +54,7 @@ impl PartialOrd for ServiceInfo {
     }
 }
 
-//TODO: When Rust allows async trait methods to be object-safe, refactor this to not use async_trait anymore
+//TODO: When async fn is allowed in public traits, use dynosaur here instead of async_trait
 #[async_trait]
 pub trait Service: DowncastSync {
     fn info(&self) -> &ServiceInfo;
