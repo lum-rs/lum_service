@@ -68,7 +68,7 @@ impl ServiceManager {
             weak: OnceLock::new(),
             services: services_map,
             background_tasks: Mutex::new(HashMap::new()),
-            on_status_change: EventRepeater::new("ServiceManager::on_status_change").await,
+            on_status_change: Arc::new(EventRepeater::new("ServiceManager::on_status_change")),
         };
 
         let arc = Arc::new(service_manager);
@@ -127,8 +127,8 @@ impl ServiceManager {
             ));
         }
 
-        let service_status_event = &service_status.on_change;
-        let attachment_result = self.on_status_change.attach(service_status_event, 10).await;
+        let service_status_event = service_status.on_change.clone();
+        let attachment_result = self.on_status_change.attach(service_status_event, 10, true);
         if let Err(err) = attachment_result {
             return Err(StartupError::StatusAttachmentFailed(
                 service_name.to_string(),
@@ -178,7 +178,7 @@ impl ServiceManager {
         let service_status = &service_info.status;
 
         let service_status_event = service_status.as_ref();
-        let detach_result = self.on_status_change.detach(service_status_event).await;
+        let detach_result = self.on_status_change.detach(service_status_event);
         if let Err(err) = detach_result {
             return Err(ShutdownError::StatusDetachmentFailed(
                 service_name.to_string(),
