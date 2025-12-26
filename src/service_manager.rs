@@ -1,13 +1,10 @@
 use lum_boxtypes::{BoxedError, LifetimedPinnedBoxedFutureResult};
 use lum_event::EventRepeater;
-use lum_libs::{
-    tokio::{
-        spawn,
-        sync::{Mutex, MutexGuard},
-        task::JoinHandle,
-        time::timeout,
-    },
-    uuid::Uuid,
+use lum_libs::tokio::{
+    spawn,
+    sync::{Mutex, MutexGuard},
+    task::JoinHandle,
+    time::timeout,
 };
 use lum_log::{error, error_panic, error_unreachable, info, warn};
 
@@ -26,42 +23,43 @@ use std::{
     time::Duration,
 };
 
+//TODO: Use DashMap
 pub struct ServiceManager {
-    pub services: HashMap<Uuid, Arc<Mutex<dyn Service>>>,
+    pub services: HashMap<u64, Arc<Mutex<dyn Service>>>,
     pub on_status_change: Arc<EventRepeater<Status>>,
 
     weak: OnceLock<Weak<Self>>,
-    background_tasks: Mutex<HashMap<Uuid, Vec<JoinHandle<Result<(), BoxedError>>>>>, //TODO: Types
+    background_tasks: Mutex<HashMap<u64, Vec<JoinHandle<Result<(), BoxedError>>>>>, //TODO: Types
 }
 
 impl ServiceManager {
     pub async fn new(services: Vec<Arc<Mutex<dyn Service>>>) -> Arc<Self> {
-        let mut services_map: HashMap<Uuid, Arc<Mutex<dyn Service>>> = HashMap::new(); //TODO: Drop type annotation
+        let mut services_map: HashMap<u64, Arc<Mutex<dyn Service>>> = HashMap::new(); //TODO: Drop type annotation
 
         //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
         for service in services.into_iter() {
             let service_lock = service.lock().await;
             let service_info = service_lock.info();
-            let service_uuid = service_info.uuid;
+            let service_id = service_info.id;
 
-            let existing_service = services_map.get(&service_uuid);
+            let existing_service = services_map.get(&service_id);
             if let Some(existing_service) = existing_service {
                 let existing_service_lock = existing_service.lock().await;
                 let existing_service_info = existing_service_lock.info();
 
                 warn!(
-                    "ServiceManager::new() was given service {} ({}) with the same UUID as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
+                    "ServiceManager::new() was given service {} ({}) with the same ID as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
                     service_info.name,
-                    service_uuid,
+                    service_id,
                     existing_service_info.name,
-                    existing_service_info.uuid,
+                    existing_service_info.id,
                     service_info.name,
-                    service_uuid
+                    service_id
                 );
                 continue;
             }
 
-            services_map.insert(service_uuid, service.clone());
+            services_map.insert(service_id, service.clone());
         }
 
         let service_manager = ServiceManager {
@@ -103,27 +101,27 @@ impl ServiceManager {
 
         let service_info = service_lock.info();
         let service_name = service_info.name.as_str();
-        let service_uuid = &service_info.uuid;
+        let service_id = service_info.id;
         let service_status = &service_info.status;
 
-        if !self.manages_service_by_uuid(service_uuid) {
+        if !self.manages_service_by_id(service_id) {
             return Err(StartupError::ServiceNotManaged(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
             ));
         }
 
         if service_status.get() != Status::Stopped {
             return Err(StartupError::ServiceNotStopped(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
             ));
         }
 
-        if self.has_background_tasks_by_uuid(service_uuid).await {
+        if self.has_background_tasks_by_id(service_id).await {
             return Err(StartupError::BackgroundTaskAlreadyRunning(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
             ));
         }
 
@@ -132,7 +130,7 @@ impl ServiceManager {
         if let Err(err) = attachment_result {
             return Err(StartupError::StatusAttachmentFailed(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
                 err,
             ));
         }
@@ -151,20 +149,20 @@ impl ServiceManager {
 
         let service_info = service_lock.info();
         let service_name = service_info.name.as_str();
-        let service_uuid = &service_info.uuid;
+        let service_id = service_info.id;
         let service_status = &service_info.status;
 
-        if !(self.manages_service_by_uuid(service_uuid)) {
+        if !(self.manages_service_by_id(service_id)) {
             return Err(ShutdownError::ServiceNotManaged(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
             ));
         }
 
         if service_status.get() != Status::Started {
             return Err(ShutdownError::ServiceNotStarted(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
             ));
         }
 
@@ -174,7 +172,7 @@ impl ServiceManager {
         // Reacquiring to allow above mutable borrow
         let service_info = service_lock.info();
         let service_name = service_info.name.as_str();
-        let service_uuid = &service_info.uuid;
+        let service_id = service_info.id;
         let service_status = &service_info.status;
 
         let service_status_event = service_status.as_ref();
@@ -182,7 +180,7 @@ impl ServiceManager {
         if let Err(err) = detach_result {
             return Err(ShutdownError::StatusDetachmentFailed(
                 service_name.to_string(),
-                *service_uuid,
+                service_id,
                 err,
             ));
         }
@@ -241,40 +239,40 @@ impl ServiceManager {
         None
     }
 
-    pub fn get_service_by_uuid(&self, uuid: &Uuid) -> Option<Arc<Mutex<dyn Service>>> {
-        self.services.get(uuid).map(Arc::clone)
+    pub fn get_service_by_id(&self, id: u64) -> Option<Arc<Mutex<dyn Service>>> {
+        self.services.get(&id).map(Arc::clone)
     }
 
-    pub fn manages_service_by_uuid(&self, uuid: &Uuid) -> bool {
-        self.get_service_by_uuid(uuid).is_some()
+    pub fn manages_service_by_id(&self, id: u64) -> bool {
+        self.get_service_by_id(id).is_some()
     }
 
     pub async fn manages_service(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
         let service_lock = service.lock().await;
-        let uuid = service_lock.info().uuid;
+        let id = service_lock.info().id;
 
-        self.manages_service_by_uuid(&uuid)
+        self.manages_service_by_id(id)
     }
 
-    pub async fn has_background_tasks_by_uuid(&self, uuid: &Uuid) -> bool {
+    pub async fn has_background_tasks_by_id(&self, id: u64) -> bool {
         let tasks = self.background_tasks.lock().await;
-        tasks.contains_key(uuid)
+        tasks.contains_key(&id)
     }
 
     pub async fn has_background_tasks_by_mutex_guard(
         &self,
         service: &MutexGuard<'_, dyn Service>,
     ) -> bool {
-        let uuid = &service.info().uuid;
+        let id = service.info().id;
 
-        self.has_background_tasks_by_uuid(uuid).await
+        self.has_background_tasks_by_id(id).await
     }
 
     pub async fn has_background_tasks(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
         let service_lock = service.lock().await;
-        let uuid = &service_lock.info().uuid;
+        let id = service_lock.info().id;
 
-        self.has_background_tasks_by_uuid(uuid).await
+        self.has_background_tasks_by_id(id).await
     }
 
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
@@ -404,11 +402,8 @@ impl ServiceManager {
                         .await;
 
                     let service_name = service_info.name.clone();
-                    let service_uuid = service_info.uuid;
-                    return Err(StartupError::FailedToStartService(
-                        service_name,
-                        service_uuid,
-                    ));
+                    let service_id = service_info.id;
+                    return Err(StartupError::FailedToStartService(service_name, service_id));
                 }
             },
             Err(error) => {
@@ -418,11 +413,8 @@ impl ServiceManager {
                     .await;
 
                 let service_name = service_info.name.clone();
-                let service_uuid = service_info.uuid;
-                return Err(StartupError::FailedToStartService(
-                    service_name,
-                    service_uuid,
-                ));
+                let service_id = service_info.id;
+                return Err(StartupError::FailedToStartService(service_name, service_id));
             }
         }
 
@@ -452,11 +444,8 @@ impl ServiceManager {
                         .await;
 
                     let service_name = service_info.name.clone();
-                    let service_uuid = service_info.uuid;
-                    return Err(ShutdownError::FailedToStopService(
-                        service_name,
-                        service_uuid,
-                    ));
+                    let service_id = service_info.id;
+                    return Err(ShutdownError::FailedToStopService(service_name, service_id));
                 }
             },
             Err(error) => {
@@ -466,11 +455,8 @@ impl ServiceManager {
                     .await;
 
                 let service_name = service_info.name.clone();
-                let service_uuid = service_info.uuid;
-                return Err(ShutdownError::FailedToStopService(
-                    service_name,
-                    service_uuid,
-                ));
+                let service_id = service_info.id;
+                return Err(ShutdownError::FailedToStopService(service_name, service_id));
             }
         }
 
@@ -500,11 +486,11 @@ impl ServiceManager {
         task: LifetimedPinnedBoxedFutureResult<'static, ()>,
     ) -> Result<(), RunTaskError> {
         let service_name = service_info.name.clone();
-        let service_uuid = service_info.uuid;
+        let service_id = service_info.id;
         let service_status = service_info.status.get();
 
         if service_status != Status::Starting && service_status != Status::Started {
-            return Err(RunTaskError::ServiceNotStarted(service_name, service_uuid));
+            return Err(RunTaskError::ServiceNotStarted(service_name, service_id));
         }
 
         let service_manager_weak = self.get_weak();
@@ -513,22 +499,22 @@ impl ServiceManager {
         taskchain.append(move |result| async move {
             let service_manager_weak = service_manager_weak;
             let service_name = service_name.clone();
-            let service_uuid = service_uuid;
+            let service_id = service_id;
 
             let service_manager = match service_manager_weak.upgrade() {
                 Some(arc) => arc,
                 None => {
                     error_panic!(
-                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior."
+                        "A task of a service {service_name} ({service_id}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior."
                     );
                 }
             };
 
-            let service = match service_manager.get_service_by_uuid(&service_uuid) {
+            let service = match service_manager.get_service_by_id(service_id) {
                 Some(service) => service,
                 None => {
                     error_panic!(
-                        "A task of a service {service_name} ({service_uuid}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior."
+                        "A task of a service {service_name} ({service_id}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior."
                     );
                 }
             };
@@ -537,7 +523,7 @@ impl ServiceManager {
             match result {
                 Ok(()) => {
                     error!(
-                        "A task of service {service_name} ({service_uuid}) ended unexpectedly! Service will be marked as failed."
+                        "A task of service {service_name} ({service_id}) ended unexpectedly! Service will be marked as failed."
                     );
 
                     service_manager.fail_service(&mut service_lock, "Background task ended unexpectedly!").await;
@@ -545,7 +531,7 @@ impl ServiceManager {
 
                 Err(error) => {
                     error!(
-                        "A task of service {service_name} ({service_uuid}) ended with error: {error}. Service will be marked as failed.",
+                        "A task of service {service_name} ({service_id}) ended with error: {error}. Service will be marked as failed.",
                     );
 
                     service_manager.fail_service(&mut service_lock, error.to_string()).await;
@@ -558,7 +544,7 @@ impl ServiceManager {
 
         let mut background_tasks = self.background_tasks.lock().await;
         background_tasks
-            .entry(service_uuid)
+            .entry(service_id)
             .or_insert(Vec::new())
             .push(join_handle);
 
@@ -566,18 +552,18 @@ impl ServiceManager {
     }
 
     async fn abort_background_tasks(&self, service_lock: &MutexGuard<'_, dyn Service>) {
-        let service_uuid = &service_lock.info().uuid;
+        let service_id = service_lock.info().id;
 
-        if !self.has_background_tasks_by_uuid(service_uuid).await {
+        if !self.has_background_tasks_by_id(service_id).await {
             return;
         }
 
         let mut background_tasks = self.background_tasks.lock().await;
-        let tasks = background_tasks.get_mut(service_uuid).unwrap();
+        let tasks = background_tasks.get_mut(&service_id).unwrap();
         for task in tasks.iter() {
             task.abort();
         }
-        background_tasks.remove(service_uuid);
+        background_tasks.remove(&service_id);
     }
 }
 
