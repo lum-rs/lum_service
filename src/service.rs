@@ -5,8 +5,9 @@ use lum_event::Observable;
 use lum_libs::{
     async_trait::async_trait,
     downcast_rs::{DowncastSync, impl_downcast},
-    uuid::Uuid,
 };
+
+use crate::id::get_unique_id;
 
 use super::{
     service_manager::ServiceManager,
@@ -15,7 +16,7 @@ use super::{
 
 #[derive(Debug)]
 pub struct ServiceInfo {
-    pub uuid: Uuid,
+    pub id: u64,
     pub name: String,
     pub priority: Priority,
 
@@ -24,19 +25,20 @@ pub struct ServiceInfo {
 
 impl ServiceInfo {
     pub fn new(name: impl Into<String>, priority: Priority) -> Self {
-        let uuid = Uuid::new_v4();
+        let id = get_unique_id();
+
         Self {
-            uuid,
+            id,
             name: name.into(),
             priority,
-            status: Observable::new(Status::Stopped, format!("{uuid}::status_change")),
+            status: Observable::new(Status::Stopped, format!("{id}::status_change")),
         }
     }
 }
 
 impl PartialEq for ServiceInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.uuid == other.uuid
+        self.id == other.id
     }
 }
 
