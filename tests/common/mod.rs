@@ -6,7 +6,10 @@ use std::{
 
 use lum_boxtypes::{BoxedError, PinnedBoxedFuture};
 use lum_event::Event;
-use lum_libs::{async_trait::async_trait, parking_lot::Mutex, tokio::time::sleep};
+use lum_libs::{
+    async_trait::async_trait,
+    tokio::{sync::Mutex, time::sleep},
+};
 use lum_log::info;
 use lum_service::{
     service::{Service, ServiceInfo},
@@ -107,8 +110,8 @@ impl Service for DummyService {
     }
 }
 
-pub fn service_manager_with_dummy_service() -> Arc<ServiceManager> {
+pub async fn service_manager_with_dummy_service() -> Arc<ServiceManager> {
     let services: Vec<Arc<Mutex<dyn Service>>> = vec![Arc::new(Mutex::new(DummyService::new()))];
 
-    ServiceManager::new(services)
+    ServiceManager::new(services).await
 }
