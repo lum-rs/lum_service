@@ -1,7 +1,13 @@
-use std::fmt::{self, Display};
+use std::{
+    fmt::{self, Display},
+    sync::Arc,
+};
 
 use lum_event::event_repeater::{AttachError, DetachError};
+use lum_libs::tokio::sync::Mutex;
 use thiserror::Error;
+
+use crate::service::Service;
 
 //TODO: Move types to their own files
 #[derive(Debug, Clone)]
@@ -124,3 +130,5 @@ pub enum RunTaskError {
     #[error("Service {0} ({1}) is not managed by this Service Manager")]
     ServiceNotManaged(String, String),
 }
+
+pub type ServiceHandle = Arc<Mutex<dyn Service>>;

@@ -2,16 +2,15 @@ use lum_boxtypes::{BoxedError, LifetimedPinnedBoxedFutureResult};
 use lum_event::EventRepeater;
 use lum_libs::{
     dashmap::DashMap,
-    tokio::{
-        spawn,
-        sync::{Mutex, MutexGuard},
-        task::JoinHandle,
-        time::timeout,
-    },
+    tokio::{spawn, sync::MutexGuard, task::JoinHandle, time::timeout},
 };
 use lum_log::{error, error_panic, error_unreachable, info, warn};
 
-use crate::{service::ServiceInfo, taskchain::Taskchain, types::RunTaskError};
+use crate::{
+    service::ServiceInfo,
+    taskchain::Taskchain,
+    types::{RunTaskError, ServiceHandle},
+};
 
 use super::{
     service::Service,
@@ -28,7 +27,7 @@ use std::{
 };
 
 pub struct ServiceManager {
-    pub services: HashMap<TypeId, Arc<Mutex<dyn Service>>>,
+    pub services: HashMap<TypeId, ServiceHandle>,
     pub on_status_change: Arc<EventRepeater<Status>>,
 
     weak: OnceLock<Weak<Self>>,
@@ -36,8 +35,8 @@ pub struct ServiceManager {
 }
 
 impl ServiceManager {
-    pub async fn new(services: Vec<Arc<Mutex<dyn Service>>>) -> Arc<Self> {
-        let mut services_map: HashMap<TypeId, Arc<Mutex<dyn Service>>> = HashMap::new(); //TODO: Drop type annotation
+    pub async fn new(services: Vec<ServiceHandle>) -> Arc<Self> {
+        let mut services_map: HashMap<TypeId, ServiceHandle> = HashMap::new(); //TODO: Drop type annotation
 
         //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
         for service in services.into_iter() {
@@ -95,10 +94,7 @@ impl ServiceManager {
         }
     }
 
-    pub async fn start_service(
-        &self,
-        service: Arc<Mutex<dyn Service>>,
-    ) -> Result<(), StartupError> {
+    pub async fn start_service(&self, service: ServiceHandle) -> Result<(), StartupError> {
         let mut service_lock = service.lock().await;
 
         let service_info = service_lock.info();
@@ -139,10 +135,7 @@ impl ServiceManager {
         Ok(())
     }
 
-    pub async fn stop_service(
-        &self,
-        service: Arc<Mutex<dyn Service>>,
-    ) -> Result<(), ShutdownError> {
+    pub async fn stop_service(&self, service: ServiceHandle) -> Result<(), ShutdownError> {
         let mut service_lock = service.lock().await;
 
         let service_info = service_lock.info();
@@ -205,7 +198,7 @@ impl ServiceManager {
         results
     }
 
-    pub async fn get_service_by_type<T: Service>(&self) -> Option<Arc<Mutex<dyn Service>>> {
+    pub async fn get_service_by_type<T: Service>(&self) -> Option<ServiceHandle> {
         for service in self.services.values() {
             let lock = service.lock().await;
             if lock.downcast_ref::<T>().is_some() {
@@ -246,7 +239,7 @@ impl ServiceManager {
     }
 
     //TODO: ServiceHandle type
-    pub fn get_service(&self, type_id: &TypeId) -> Option<Arc<Mutex<dyn Service>>> {
+    pub fn get_service(&self, type_id: &TypeId) -> Option<ServiceHandle> {
         self.services.get(type_id).map(Arc::clone)
     }
 
@@ -254,13 +247,13 @@ impl ServiceManager {
         self.get_service(type_id).is_some()
     }
 
-    pub async fn manages_service(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
+    pub async fn manages_service(&self, service: &ServiceHandle) -> bool {
         let type_id = service.lock().await.info().type_id;
         self.manages_service_by_type_id(&type_id)
     }
 
     pub fn has_background_tasks_by_type_id(&self, type_id: &TypeId) -> bool {
-        self.background_tasks.contains_key(&type_id)
+        self.background_tasks.contains_key(type_id)
     }
 
     pub fn has_background_tasks_by_mutex_guard(
@@ -271,7 +264,7 @@ impl ServiceManager {
         self.has_background_tasks_by_type_id(&type_id)
     }
 
-    pub async fn has_background_tasks(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
+    pub async fn has_background_tasks(&self, service: &ServiceHandle) -> bool {
         let type_id = service.lock().await.info().type_id;
         self.has_background_tasks_by_type_id(&type_id)
     }
@@ -470,7 +463,7 @@ impl ServiceManager {
 
     async fn fail_service<IntoString: Into<String>>(
         &self,
-        service: Arc<Mutex<dyn Service>>,
+        service: ServiceHandle,
         message: IntoString,
     ) {
         let mut service_lock = service.lock().await;
