@@ -11,7 +11,7 @@ mod tests {
 
     #[tokio::test]
     async fn test() {
-        let service_manager = service_manager_with_dummy_service().await;
+        let service_manager = service_manager_with_dummy_service();
 
         service_manager.start_services().await;
 

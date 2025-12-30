@@ -1,4 +1,8 @@
-use std::{cmp::Ordering, sync::Weak};
+use std::{
+    any::{self, TypeId},
+    cmp::Ordering,
+    sync::Weak,
+};
 
 use lum_boxtypes::{BoxedError, PinnedBoxedFuture};
 use lum_event::Observable;
@@ -7,8 +11,6 @@ use lum_libs::{
     downcast_rs::{DowncastSync, impl_downcast},
 };
 
-use crate::id::get_unique_id;
-
 use super::{
     service_manager::ServiceManager,
     types::{Priority, Status},
@@ -16,7 +18,8 @@ use super::{
 
 #[derive(Debug)]
 pub struct ServiceInfo {
-    pub id: u64,
+    pub type_id: TypeId,
+    pub type_name: &'static str,
     pub name: String,
     pub priority: Priority,
 
@@ -24,21 +27,25 @@ pub struct ServiceInfo {
 }
 
 impl ServiceInfo {
-    pub fn new(name: impl Into<String>, priority: Priority) -> Self {
-        let id = get_unique_id();
+    pub fn new(service_type: TypeId, name: impl Into<String>, priority: Priority) -> Self {
+        let type_id = service_type;
+        let type_name = any::type_name_of_val(&type_id);
+        let name = name.into();
+        let status = Observable::new(Status::Stopped, format!("{type_name}::status_change"));
 
         Self {
-            id,
-            name: name.into(),
+            type_id,
+            type_name,
+            name,
             priority,
-            status: Observable::new(Status::Stopped, format!("{id}::status_change")),
+            status,
         }
     }
 }
 
 impl PartialEq for ServiceInfo {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
+        self.type_id == other.type_id
     }
 }
 

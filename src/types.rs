@@ -82,45 +82,45 @@ impl Display for Priority {
 #[derive(Debug, Error)]
 pub enum StartupError {
     #[error("Service {0} ({1}) is not managed by this Service Manager")]
-    ServiceNotManaged(String, u64),
+    ServiceNotManaged(String, String),
 
     #[error("Service {0} ({1}) is not stopped")]
-    ServiceNotStopped(String, u64),
+    ServiceNotStopped(String, String),
 
-    //TODO: BackgroundTaskRunning(String, u64, int32): Service {0} ({1}) has {2} background tasks running
+    //TODO: BackgroundTaskRunning(String, String, int32): Service {0} ({1}) has {2} background tasks running
     #[error("Service {0} ({1}) already has a background task running")]
-    BackgroundTaskAlreadyRunning(String, u64),
+    BackgroundTaskAlreadyRunning(String, String),
     #[error(
         "Failed to attach Service Manager's status_change EventRepeater to {0} ({1})'s status_change Event: {2}"
     )]
-    StatusAttachmentFailed(String, u64, AttachError),
+    StatusAttachmentFailed(String, String, AttachError),
 
     #[error("Service {0} ({1}) failed to start")]
-    FailedToStartService(String, u64),
+    FailedToStartService(String, String),
 }
 
 #[derive(Debug, Error)]
 pub enum ShutdownError {
     #[error("Service {0} ({1}) is not managed by this Service Manager")]
-    ServiceNotManaged(String, u64),
+    ServiceNotManaged(String, String),
 
     #[error("Service {0} ({1}) is not started")]
-    ServiceNotStarted(String, u64),
+    ServiceNotStarted(String, String),
 
     #[error("Service {0} ({1}) failed to stop")]
-    FailedToStopService(String, u64),
+    FailedToStopService(String, String),
 
     #[error(
         "Failed to detach Service Manager's status_change EventRepeater from {0} ({1})'s status_change Event: {2}"
     )]
-    StatusDetachmentFailed(String, u64, DetachError),
+    StatusDetachmentFailed(String, String, DetachError),
 }
 
 #[derive(Debug, Error)]
 pub enum RunTaskError {
     #[error("Service {0} ({1}) is not started or currently starting")]
-    ServiceNotStarted(String, u64),
+    ServiceNotStarted(String, String),
 
     #[error("Service {0} ({1}) is not managed by this Service Manager")]
-    ServiceNotManaged(String, u64),
+    ServiceNotManaged(String, String),
 }

@@ -1,10 +1,9 @@
 use lum_boxtypes::{BoxedError, LifetimedPinnedBoxedFutureResult};
 use lum_event::EventRepeater;
-use lum_libs::tokio::{
-    spawn,
-    sync::{Mutex, MutexGuard},
-    task::JoinHandle,
-    time::timeout,
+use lum_libs::{
+    dashmap::DashMap,
+    parking_lot::{Mutex, MutexGuard},
+    tokio::{spawn, task::JoinHandle, time::timeout},
 };
 use lum_log::{error, error_panic, error_unreachable, info, warn};
 
@@ -16,56 +15,55 @@ use super::{
 };
 
 use std::{
+    any::TypeId,
     collections::HashMap,
     fmt::{self, Display},
-    mem,
+    future::Future,
     sync::{Arc, OnceLock, Weak},
     time::Duration,
 };
 
-//TODO: Use DashMap
 pub struct ServiceManager {
-    pub services: HashMap<u64, Arc<Mutex<dyn Service>>>,
+    pub services: HashMap<TypeId, Arc<Mutex<dyn Service>>>,
     pub on_status_change: Arc<EventRepeater<Status>>,
 
     weak: OnceLock<Weak<Self>>,
-    background_tasks: Mutex<HashMap<u64, Vec<JoinHandle<Result<(), BoxedError>>>>>, //TODO: Types
+    background_tasks: DashMap<TypeId, Vec<JoinHandle<Result<(), BoxedError>>>>,
 }
 
 impl ServiceManager {
-    pub async fn new(services: Vec<Arc<Mutex<dyn Service>>>) -> Arc<Self> {
-        let mut services_map: HashMap<u64, Arc<Mutex<dyn Service>>> = HashMap::new(); //TODO: Drop type annotation
+    pub fn new(services: Vec<Arc<Mutex<dyn Service>>>) -> Arc<Self> {
+        let mut services_map: HashMap<TypeId, Arc<Mutex<dyn Service>>> = HashMap::new(); //TODO: Drop type annotation
 
         //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
         for service in services.into_iter() {
-            let service_lock = service.lock().await;
+            let service_lock = service.lock();
             let service_info = service_lock.info();
-            let service_id = service_info.id;
 
-            let existing_service = services_map.get(&service_id);
+            let existing_service = services_map.get(&service_info.type_id);
             if let Some(existing_service) = existing_service {
-                let existing_service_lock = existing_service.lock().await;
+                let existing_service_lock = existing_service.lock();
                 let existing_service_info = existing_service_lock.info();
 
                 warn!(
-                    "ServiceManager::new() was given service {} ({}) with the same ID as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
+                    "ServiceManager::new() was given service {} ({}), which has the same TypeId as service {} ({}). This is not allowed. The service {} ({}) will be ignored.",
                     service_info.name,
-                    service_id,
+                    service_info.type_name,
                     existing_service_info.name,
-                    existing_service_info.id,
+                    existing_service_info.type_name,
                     service_info.name,
-                    service_id
+                    service_info.type_name
                 );
                 continue;
             }
 
-            services_map.insert(service_id, service.clone());
+            services_map.insert(service_info.type_id, service.clone());
         }
 
         let service_manager = ServiceManager {
             weak: OnceLock::new(),
             services: services_map,
-            background_tasks: Mutex::new(HashMap::new()),
+            background_tasks: DashMap::new(),
             on_status_change: Arc::new(EventRepeater::new("ServiceManager::on_status_change")),
         };
 
@@ -97,40 +95,36 @@ impl ServiceManager {
         &self,
         service: Arc<Mutex<dyn Service>>,
     ) -> Result<(), StartupError> {
-        let mut service_lock = service.lock().await;
+        let mut service_lock = service.lock();
 
         let service_info = service_lock.info();
-        let service_name = service_info.name.as_str();
-        let service_id = service_info.id;
-        let service_status = &service_info.status;
-
-        if !self.manages_service_by_id(service_id) {
+        if !self.manages_service_by_type_id(&service_info.type_id) {
             return Err(StartupError::ServiceNotManaged(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
             ));
         }
 
-        if service_status.get() != Status::Stopped {
+        if service_info.status.get() != Status::Stopped {
             return Err(StartupError::ServiceNotStopped(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
             ));
         }
 
-        if self.has_background_tasks_by_id(service_id).await {
+        if self.has_background_tasks_by_type_id(&service_info.type_id) {
             return Err(StartupError::BackgroundTaskAlreadyRunning(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
             ));
         }
 
-        let service_status_event = service_status.on_change.clone();
+        let service_status_event = service_info.status.on_change.clone();
         let attachment_result = self.on_status_change.attach(service_status_event, 10, true);
         if let Err(err) = attachment_result {
             return Err(StartupError::StatusAttachmentFailed(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
                 err,
             ));
         }
@@ -145,24 +139,20 @@ impl ServiceManager {
         &self,
         service: Arc<Mutex<dyn Service>>,
     ) -> Result<(), ShutdownError> {
-        let mut service_lock = service.lock().await;
+        let mut service_lock = service.lock();
 
         let service_info = service_lock.info();
-        let service_name = service_info.name.as_str();
-        let service_id = service_info.id;
-        let service_status = &service_info.status;
-
-        if !(self.manages_service_by_id(service_id)) {
+        if !(self.manages_service_by_type_id(&service_info.type_id)) {
             return Err(ShutdownError::ServiceNotManaged(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
             ));
         }
 
-        if service_status.get() != Status::Started {
+        if service_info.status.get() != Status::Started {
             return Err(ShutdownError::ServiceNotStarted(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
             ));
         }
 
@@ -171,21 +161,18 @@ impl ServiceManager {
         //TODO: Find better way to handle this
         // Reacquiring to allow above mutable borrow
         let service_info = service_lock.info();
-        let service_name = service_info.name.as_str();
-        let service_id = service_info.id;
-        let service_status = &service_info.status;
 
-        let service_status_event = service_status.as_ref();
+        let service_status_event = service_info.status.on_change.as_ref();
         let detach_result = self.on_status_change.detach(service_status_event);
         if let Err(err) = detach_result {
             return Err(ShutdownError::StatusDetachmentFailed(
-                service_name.to_string(),
-                service_id,
+                service_info.name.to_string(),
+                service_info.type_name.to_string(),
                 err,
             ));
         }
 
-        info!("Stopped service {service_name}");
+        info!("Stopped service {}", service_info.name);
 
         Ok(())
     }
@@ -214,73 +201,80 @@ impl ServiceManager {
         results
     }
 
-    //TODO: Remove comment after testing this
-    /*
-        I tried to do this in safe rust for 3 days, but I couldn't figure it out
-        Should you come up with a way to do this in safe rust, please make a PR! :)
-        Anyways, this should never cause any issues, since we checked if the service is of type T
-    */
-    pub async fn get_service_by_type<T: Service>(&self) -> Option<Arc<Mutex<T>>> {
-        for pair in self.services.iter() {
-            let service = pair.1;
-            let lock = service.lock().await;
-
-            let is_t = lock.as_any().is::<T>();
-            if is_t {
-                let service_ptr: *const Arc<Mutex<dyn Service>> = service;
-
-                unsafe {
-                    let t_ptr: *const Arc<Mutex<T>> = mem::transmute(service_ptr);
-                    return Some(Arc::clone(&*t_ptr));
-                }
+    pub fn get_service_by_type<T: Service>(&self) -> Option<Arc<Mutex<dyn Service>>> {
+        for service in self.services.values() {
+            let lock = service.lock();
+            if (&*lock).downcast_ref::<T>().is_some() {
+                return Some(Arc::clone(service));
             }
         }
-
         None
     }
 
-    pub fn get_service_by_id(&self, id: u64) -> Option<Arc<Mutex<dyn Service>>> {
-        self.services.get(&id).map(Arc::clone)
+    pub fn with_service<T: Service + 'static, R>(&self, f: impl FnOnce(&mut T) -> R) -> Option<R> {
+        match self.get_service_by_type::<T>() {
+            Some(service) => {
+                let mut lock = service.lock();
+                let service_ref = (&mut *lock).downcast_mut::<T>().unwrap();
+
+                Some(f(service_ref))
+            }
+            None => None,
+        }
     }
 
-    pub fn manages_service_by_id(&self, id: u64) -> bool {
-        self.get_service_by_id(id).is_some()
+    pub async fn with_service_async<T: Service + 'static, R, F: Future<Output = R>>(
+        &self,
+        f: impl FnOnce(&mut T) -> F,
+    ) -> Option<R> {
+        match self.get_service_by_type::<T>() {
+            Some(service) => {
+                let mut lock = service.lock();
+                let service_ref = (&mut *lock).downcast_mut::<T>().unwrap();
+
+                Some(f(service_ref).await)
+            }
+            None => None,
+        }
     }
 
-    pub async fn manages_service(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
-        let service_lock = service.lock().await;
-        let id = service_lock.info().id;
-
-        self.manages_service_by_id(id)
+    //TODO: ServiceHandle type
+    pub fn get_service(&self, type_id: &TypeId) -> Option<Arc<Mutex<dyn Service>>> {
+        self.services.get(type_id).map(Arc::clone)
     }
 
-    pub async fn has_background_tasks_by_id(&self, id: u64) -> bool {
-        let tasks = self.background_tasks.lock().await;
-        tasks.contains_key(&id)
+    pub fn manages_service_by_type_id(&self, type_id: &TypeId) -> bool {
+        self.get_service(type_id).is_some()
     }
 
-    pub async fn has_background_tasks_by_mutex_guard(
+    pub fn manages_service(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
+        let type_id = service.lock().info().type_id;
+        self.manages_service_by_type_id(&type_id)
+    }
+
+    pub fn has_background_tasks_by_type_id(&self, type_id: &TypeId) -> bool {
+        self.background_tasks.contains_key(&type_id)
+    }
+
+    pub fn has_background_tasks_by_mutex_guard(
         &self,
         service: &MutexGuard<'_, dyn Service>,
     ) -> bool {
-        let id = service.info().id;
-
-        self.has_background_tasks_by_id(id).await
+        let type_id = service.info().type_id;
+        self.has_background_tasks_by_type_id(&type_id)
     }
 
     pub async fn has_background_tasks(&self, service: &Arc<Mutex<dyn Service>>) -> bool {
-        let service_lock = service.lock().await;
-        let id = service_lock.info().id;
-
-        self.has_background_tasks_by_id(id).await
+        let type_id = service.lock().info().type_id;
+        self.has_background_tasks_by_type_id(&type_id)
     }
 
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
-    pub async fn health(&self) -> Health {
+    pub fn health(&self) -> Health {
         for pair in self.services.iter() {
             let service = pair.1;
-            let lock = service.lock().await;
-            let service_info = lock.info();
+            let service_lock = service.lock();
+            let service_info = service_lock.info();
 
             if service_info.priority != Priority::Essential {
                 continue;
@@ -297,7 +291,7 @@ impl ServiceManager {
 
     //TODO: Remove?
     //TODO: When Rust allows async closures, refactor this to use iterator methods instead of for loop
-    pub async fn status_overview(&self) -> String {
+    pub fn status_overview(&self) -> String {
         let mut text_buffer = String::new();
 
         let mut failed_essentials = Vec::new();
@@ -308,11 +302,11 @@ impl ServiceManager {
 
         for pair in self.services.iter() {
             let service = pair.1;
-            let lock = service.lock().await;
-            let service_info = lock.info();
-            let status = service_info.status.get();
-            let priority = service_info.priority;
-            let name = service_info.name.as_str();
+            let lock = service.lock();
+            let info = lock.info();
+            let status = info.status.get();
+            let priority = info.priority;
+            let name = info.name.as_str();
 
             match status {
                 Status::Started | Status::Stopped => match priority {
@@ -401,9 +395,10 @@ impl ServiceManager {
                         .set(Status::FailedToStart(error.to_string()))
                         .await;
 
-                    let service_name = service_info.name.clone();
-                    let service_id = service_info.id;
-                    return Err(StartupError::FailedToStartService(service_name, service_id));
+                    return Err(StartupError::FailedToStartService(
+                        service_info.name.clone(),
+                        service_info.type_name.to_string(),
+                    ));
                 }
             },
             Err(error) => {
@@ -412,9 +407,10 @@ impl ServiceManager {
                     .set(Status::FailedToStart(error.to_string()))
                     .await;
 
-                let service_name = service_info.name.clone();
-                let service_id = service_info.id;
-                return Err(StartupError::FailedToStartService(service_name, service_id));
+                return Err(StartupError::FailedToStartService(
+                    service_info.name.clone(),
+                    service_info.type_name.to_string(),
+                ));
             }
         }
 
@@ -443,9 +439,10 @@ impl ServiceManager {
                         .set(Status::FailedToStop(error.to_string()))
                         .await;
 
-                    let service_name = service_info.name.clone();
-                    let service_id = service_info.id;
-                    return Err(ShutdownError::FailedToStopService(service_name, service_id));
+                    return Err(ShutdownError::FailedToStopService(
+                        service_info.name.clone(),
+                        service_info.type_name.to_string(),
+                    ));
                 }
             },
             Err(error) => {
@@ -454,9 +451,10 @@ impl ServiceManager {
                     .set(Status::FailedToStop(error.to_string()))
                     .await;
 
-                let service_name = service_info.name.clone();
-                let service_id = service_info.id;
-                return Err(ShutdownError::FailedToStopService(service_name, service_id));
+                return Err(ShutdownError::FailedToStopService(
+                    service_info.name.clone(),
+                    service_info.type_name.to_string(),
+                ));
             }
         }
 
@@ -464,6 +462,16 @@ impl ServiceManager {
     }
 
     async fn fail_service<IntoString: Into<String>>(
+        &self,
+        service: Arc<Mutex<dyn Service>>,
+        message: IntoString,
+    ) {
+        let mut service_lock = service.lock();
+        self.fail_service_by_mutex_guard(&mut service_lock, message)
+            .await;
+    }
+
+    async fn fail_service_by_mutex_guard<IntoString: Into<String>>(
         &self,
         service: &mut MutexGuard<'_, dyn Service>,
         message: IntoString,
@@ -485,12 +493,18 @@ impl ServiceManager {
         service_info: &ServiceInfo,
         task: LifetimedPinnedBoxedFutureResult<'static, ()>,
     ) -> Result<(), RunTaskError> {
-        let service_name = service_info.name.clone();
-        let service_id = service_info.id;
+        // We're cloning these values to move them into the task's closure
+        // Otherwise, we would reference service_info and get lifetime issues
+        let service_name = service_info.name.to_string();
+        let service_type_id = service_info.type_id;
+        let service_type_name = service_info.type_name; // this is static, so no need to clone
         let service_status = service_info.status.get();
 
         if service_status != Status::Starting && service_status != Status::Started {
-            return Err(RunTaskError::ServiceNotStarted(service_name, service_id));
+            return Err(RunTaskError::ServiceNotStarted(
+                service_name.to_string(),
+                service_type_name.to_string(),
+            ));
         }
 
         let service_manager_weak = self.get_weak();
@@ -498,43 +512,39 @@ impl ServiceManager {
         //TODO: When Rust allows async closures, refactor this to have the "async" keyword after the "move" keyword
         taskchain.append(move |result| async move {
             let service_manager_weak = service_manager_weak;
-            let service_name = service_name.clone();
-            let service_id = service_id;
-
             let service_manager = match service_manager_weak.upgrade() {
                 Some(arc) => arc,
                 None => {
                     error_panic!(
-                        "A task of a service {service_name} ({service_id}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior."
+                        "A task of a service {service_name} ({service_type_name}) unexpectedly ended, but cannot mark service as failed because its corresponding ServiceManager was already dropped. Panicking to prevent further undefined behavior."
                     );
                 }
             };
 
-            let service = match service_manager.get_service_by_id(service_id) {
+            let service = match service_manager.get_service(&service_type_id) {
                 Some(service) => service,
                 None => {
                     error_panic!(
-                        "A task of a service {service_name} ({service_id}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior."
+                        "A task of a service {service_name} ({service_type_name}) unexpectedly ended, but no service with that ID was registered in its corresponding ServiceManager. Was it removed while the task was running? Panicking to prevent further undefined behavior."
                     );
                 }
             };
 
-            let mut service_lock = service.lock().await;
             match result {
                 Ok(()) => {
                     error!(
-                        "A task of service {service_name} ({service_id}) ended unexpectedly! Service will be marked as failed."
+                        "A task of service {service_name} ({service_type_name}) ended unexpectedly! Service will be marked as failed."
                     );
 
-                    service_manager.fail_service(&mut service_lock, "Background task ended unexpectedly!").await;
+                    service_manager.fail_service(service, "Background task ended unexpectedly!").await;
                 }
 
                 Err(error) => {
                     error!(
-                        "A task of service {service_name} ({service_id}) ended with error: {error}. Service will be marked as failed.",
+                        "A task of service {service_name} ({service_type_name}) ended with error: {error}. Service will be marked as failed.",
                     );
 
-                    service_manager.fail_service(&mut service_lock, error.to_string()).await;
+                    service_manager.fail_service(service, error.to_string()).await;
                 }
             }
             Ok(())
@@ -542,28 +552,26 @@ impl ServiceManager {
 
         let join_handle = spawn(taskchain.run());
 
-        let mut background_tasks = self.background_tasks.lock().await;
-        background_tasks
-            .entry(service_id)
-            .or_insert(Vec::new())
+        self.background_tasks
+            .entry(service_info.type_id)
+            .or_default()
             .push(join_handle);
 
         Ok(())
     }
 
     async fn abort_background_tasks(&self, service_lock: &MutexGuard<'_, dyn Service>) {
-        let service_id = service_lock.info().id;
+        let service_type_id = service_lock.info().type_id;
 
-        if !self.has_background_tasks_by_id(service_id).await {
+        if !self.has_background_tasks_by_type_id(&service_type_id) {
             return;
         }
 
-        let mut background_tasks = self.background_tasks.lock().await;
-        let tasks = background_tasks.get_mut(&service_id).unwrap();
+        let tasks = self.background_tasks.get_mut(&service_type_id).unwrap();
         for task in tasks.iter() {
             task.abort();
         }
-        background_tasks.remove(&service_id);
+        self.background_tasks.remove(&service_type_id);
     }
 }
 
@@ -578,7 +586,7 @@ impl Display for ServiceManager {
 
         let mut services = self.services.iter().peekable();
         while let Some((_, service)) = services.next() {
-            let service = service.blocking_lock();
+            let service = service.lock();
             let service_info = service.info();
 
             write!(f, "{}", service_info.name,)?;
