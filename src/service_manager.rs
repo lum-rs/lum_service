@@ -119,8 +119,8 @@ impl ServiceManager {
             ));
         }
 
-        let service_status_event = service_info.status.on_change.clone();
-        let attachment_result = self.on_status_change.attach(service_status_event, 10, true);
+        let service_status_event = service_info.status.on_change.handle();
+        let attachment_result = self.on_status_change.attach(service_status_event);
         if let Err(err) = attachment_result {
             return Err(StartupError::StatusAttachmentFailed(
                 service_info.name.to_string(),
@@ -159,7 +159,7 @@ impl ServiceManager {
         // Reacquiring to allow above mutable borrow
         let service_info = service_lock.info();
 
-        let service_status_event = service_info.status.on_change.as_ref();
+        let service_status_event = service_info.status.on_change.handle();
         let detach_result = self.on_status_change.detach(service_status_event);
         if let Err(err) = detach_result {
             return Err(ShutdownError::StatusDetachmentFailed(
